@@ -8,6 +8,8 @@ A media toolbox for Windows 10 and 11, built with Electron, ffmpeg and yt-dlp.
 
 ![Nabbit](docs/screenshots/hero.png)
 
+**[Try the interface in your browser →](https://<you>.github.io/nabbit/demo/)**
+
 </div>
 
 ## Features
@@ -48,6 +50,10 @@ build.bat
 ```
 
 This runs the tests and builds `dist\Nabbit Setup <version>.exe`.
+
+### Interface demo (GitHub Pages)
+
+`docs/demo/` is the real interface running on sample data, so anyone can click through it in a browser. To publish it, open the repo's **Settings → Pages** and set **Source** to *Deploy from a branch*, **Branch** to `main`, and the folder to `/docs`. It goes live at `https://<you>.github.io/nabbit/demo/`. After changing the UI, run `npm run demo` to rebuild it, then commit.
 
 ## Documentation
 
