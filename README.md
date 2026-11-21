@@ -8,7 +8,7 @@ A media toolbox for Windows 10 and 11, built with Electron, ffmpeg and yt-dlp.
 
 ![Nabbit](docs/screenshots/hero.png)
 
-**[Try the interface in your browser →](https://<you>.github.io/nabbit/demo/)**
+**[Try the interface in your browser →](https://n0lses.github.io/Nabbit/demo/)**
 
 </div>
 
