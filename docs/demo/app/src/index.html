@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; media-src 'self' file: http://127.0.0.1:*; img-src 'self' https: data:" />
+  <title>Nabbit</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Title bar drawn by the app (so it fades with the theme); Windows adds the window buttons on the right -->
+  <header class="titlebar"><img src="assets/icon.png" alt="" /><span id="win-title">Nabbit</span><span class="tb-code">// _B42;</span><span class="ticks run tb-ticks" aria-hidden="true"></span>
+    <div class="tb-ctrl hidden" id="tb-ctrl">
+      <button type="button" id="tb-min" aria-label="Minimize"><svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M0 5.5h10" stroke="currentColor" stroke-width="1"/></svg></button>
+      <button type="button" id="tb-max" aria-label="Maximize"><svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path class="i-max" d="M.5.5h9v9h-9z" fill="none" stroke="currentColor" stroke-width="1"/><path class="i-restore" d="M2.5.5h7v7M.5 2.5h7v7h-7z" fill="none" stroke="currentColor" stroke-width="1"/></svg></button>
+      <button type="button" id="tb-close" class="tb-x" aria-label="Close"><svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M.5.5l9 9M9.5.5l-9 9" stroke="currentColor" stroke-width="1"/></svg></button>
+    </div></header>
+  <aside class="sidebar">
+    <div class="brand"><img class="logo pulse" src="assets/icon.png" alt="" />
+      <div class="brand-text"><span class="brand-name">Nabbit</span><span class="brand-sub">Media toolbox</span></div>
+    </div>
+    <div class="bars run brand-bars" aria-hidden="true"></div>
+    <div class="side-label" aria-hidden="true">■ Tools</div>
+    <nav>
+      <button class="tab active" data-tool="download" data-mode="video"><span class="code" aria-hidden="true">01</span><span class="tab-label">Video Downloader</span><span class="arrow" aria-hidden="true">◂</span></button>
+      <button class="tab" data-tool="download" data-mode="music"><span class="code" aria-hidden="true">02</span><span class="tab-label">Music Downloader</span><span class="arrow" aria-hidden="true">◂</span></button>
+      <button class="tab" data-tool="convert"><span class="code" aria-hidden="true">03</span><span class="tab-label">Converter</span><span class="arrow" aria-hidden="true">◂</span></button>
+      <button class="tab" data-tool="trim"><span class="code" aria-hidden="true">04</span><span class="tab-label">Trimmer</span><span class="arrow" aria-hidden="true">◂</span></button>
+      <button class="tab" data-tool="compress"><span class="code" aria-hidden="true">05</span><span class="tab-label">Compressor</span><span class="arrow" aria-hidden="true">◂</span></button>
+      <button class="tab" data-tool="editor"><span class="code" aria-hidden="true">06</span><span class="tab-label">Audio Editor</span><span class="arrow" aria-hidden="true">◂</span></button>
+    </nav>
+    <div class="side-deco" aria-hidden="true"><img class="hud-ink breathe" src="assets/hud/rings.svg" alt="" /></div>
+    <!-- Shared job queue, collapsed by default -->
+    <details id="jobs-box" class="side-jobs">
+      <summary><span class="live" aria-hidden="true"></span><span>Jobs</span><span id="jobs-count" class="jobs-count hidden"></span></summary>
+      <div class="jobs-tools"><button type="button" id="jobs-clear" class="link-btn hidden" title="Remove finished jobs from the list (running ones stay)">Clear all</button></div>
+      <div id="jobs"><p class="empty">No jobs yet.</p></div>
+    </details>
+    <div class="side-foot">
+      <button type="button" class="tab settings-tab" data-tool="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M12.78 6.52 L14.70 6.85 L14.70 9.15 L12.78 9.48 L12.42 10.33 L13.55 11.93 L11.93 13.55 L10.33 12.42 L9.48 12.78 L9.15 14.70 L6.85 14.70 L6.52 12.78 L5.67 12.42 L4.07 13.55 L2.45 11.93 L3.58 10.33 L3.22 9.48 L1.30 9.15 L1.30 6.85 L3.22 6.52 L3.58 5.67 L2.45 4.07 L4.07 2.45 L5.67 3.58 L6.52 3.22 L6.85 1.30 L9.15 1.30 L9.48 3.22 L10.33 3.58 L11.93 2.45 L13.55 4.07 L12.42 5.67 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
+      <div class="version" id="app-version">v0.1.0</div>
+      <div id="theme-switch" class="theme-switch" role="radiogroup" aria-label="Theme">
+        <button type="button" data-theme="system" role="radio" title="System theme" aria-label="System theme">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 14h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <button type="button" data-theme="light" role="radio" title="Light theme" aria-label="Light theme">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3.1 3.1l1.1 1.1M11.8 11.8l1.1 1.1M3.1 12.9l1.1-1.1M11.8 4.2l1.1-1.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <button type="button" data-theme="dark" role="radio" title="Dark theme" aria-label="Dark theme">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="content">
+    <!-- Downloader -->
+    <section class="panel active" id="download">
+            <div class="hud-tag" aria-hidden="true"><span>■ <b class="v-code">01</b><b class="m-code">02</b>* ——— Downloader</span><span class="sys">SYS.READY <i class="dia">◆</i><i class="dia">◆</i><i class="dia">◆</i></span></div>
+      <div class="hud-title"><h1 id="dl-heading">Video Downloader</h1><span class="caret" aria-hidden="true"></span><span class="ticks wipe" aria-hidden="true"></span></div>
+      <p class="hint" id="dl-hint">Paste a link to a video you have the right to download.</p>
+
+      <form id="dl-form" class="searchbar" autocomplete="off">
+        <img class="sb-ico hud-ink" src="assets/hud/crosshair.svg" alt="" />
+        <input id="dl-url" type="text" value="https://" placeholder="https://" spellcheck="false" />
+        <button type="button" class="icon-btn" id="dl-clear" title="Clear" aria-label="Clear"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 3.5l9 9m0-9l-9 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <button type="submit" class="search-btn" id="dl-search">Search</button>
+      </form>
+
+      <!-- Music Downloader: what to search for when the box holds words instead of a link -->
+      <div id="mu-types" class="mu-types music-only" role="radiogroup" aria-label="Search for">
+        <button type="button" class="chip active" data-type="songs" role="radio" aria-checked="true">Songs</button>
+        <button type="button" class="chip" data-type="albums" role="radio" aria-checked="false">Albums</button>
+        <button type="button" class="chip" data-type="playlists" role="radio" aria-checked="false">Playlists</button>
+        <button type="button" class="chip" data-type="artists" role="radio" aria-checked="false">Artists</button>
+        <div id="mu-provider" class="mu-provider" role="radiogroup" aria-label="Search on">
+          <button type="button" class="seg active" data-provider="ytmusic" role="radio" aria-checked="true">YouTube Music</button>
+          <button type="button" class="seg" data-provider="soundcloud" role="radio" aria-checked="false">SoundCloud</button>
+        </div>
+      </div>
+
+      <div id="dl-state" class="dl-state hidden"></div>
+
+      <!-- Music: results on the left, the opened album beside them -->
+      <div id="mu-split" class="mu-split">
+      <!-- Music search results -->
+      <div id="mu-results" class="mu-results hidden"></div>
+      <button type="button" id="mu-back" class="link-btn mu-back hidden">← Back to results</button>
+
+      <!-- Artist page (filled by renderArtist) -->
+      <article id="mu-artist-page" class="artist-page hidden" aria-live="polite"></article>
+
+      <!-- Album / playlist view -->
+      <article id="mu-album" class="mu-album hidden">
+        <div class="album-head">
+          <img id="mu-cover" alt="" />
+          <div class="album-meta">
+            <div class="album-kind" id="mu-kind">Album</div>
+            <h2 id="mu-title"></h2>
+            <div class="meta-line uploader" id="mu-artist"></div>
+            <div class="meta-line" id="mu-stats"></div>
+            <div class="meta-line src-line hidden" id="mu-src"></div>
+          </div>
+        </div>
+        <div class="track-head">
+          <label class="check"><input type="checkbox" id="mu-all" checked /> Select all</label>
+          <span id="mu-selcount" class="hint small"></span>
+        </div>
+        <ol id="mu-tracks" class="track-list"></ol>
+      </article>
+
+      <article id="dl-card" class="video-card hidden">
+        <div class="thumb-wrap">
+          <img id="dl-thumb" alt="" />
+          <span id="dl-duration-badge" class="duration-badge hidden"></span>
+          <button type="button" id="dl-thumb-btn" class="thumb-dl" title="Download thumbnail" aria-label="Download thumbnail" aria-haspopup="menu" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div id="dl-thumb-menu" class="thumb-menu hidden" role="menu" aria-label="Thumbnail sizes"></div>
+        </div>
+        <div class="video-meta">
+          <h2 id="dl-title"></h2>
+          <div id="dl-uploader" class="meta-line uploader"></div>
+          <div id="dl-stats" class="meta-line"></div>
+          <div id="dl-date" class="meta-line"></div>
+          <div id="dl-tech" class="meta-line"></div>
+          <div id="dl-src" class="meta-line src-line hidden"></div>
+          <div id="dl-source" class="meta-line source"></div>
+        </div>
+      </article>
+      </div>
+
+
+      <!-- Download options: each dropdown only offers what the site actually has for the choices to its left -->
+      <div id="dl-options" class="dl-options hidden">
+        <div class="opt-row" id="dl-vrow">
+          <span class="opt-ico" title="Video">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m16 10.5 5-3v9l-5-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          </span>
+          <select id="dl-vfmt" title="Video format"></select>
+          <select id="dl-vres" title="Resolution"></select>
+          <select id="dl-vfps" title="Frame rate"></select>
+          <select id="dl-vbr" title="Video bitrate"></select>
+          <span class="opt-size" id="dl-vsize" title="Estimated file size"></span>
+        </div>
+        <div id="dl-oor-note" class="oor-note hidden"></div>
+        <div class="opt-row" id="dl-arow">
+          <span class="opt-ico" title="Audio">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V6l11-2v12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="6.5" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="17.5" cy="16" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+          </span>
+          <select id="dl-afmt" title="Audio format"></select>
+          <select id="dl-asr" title="Sample rate"></select>
+          <!-- Sample size: only shown for lossless formats (FLAC / WAV) -->
+          <select id="dl-abits" class="slot-hidden" title="Sample size"></select>
+          <select id="dl-abr" title="Audio bitrate"></select>
+          <span class="opt-size" id="dl-asize" title="Estimated file size"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Converter (built-in engine ported from File Converter) -->
+    <section class="panel" id="convert">
+      <div class="hud-tag" aria-hidden="true"><span>■ 03* ——— Converter</span><span class="sys">SYS.READY <i class="dia">◆</i><i class="dia">◆</i><i class="dia">◆</i></span></div>
+      <div class="hud-title"><h1>File Converter</h1><span class="caret" aria-hidden="true"></span><span class="ticks wipe" aria-hidden="true"></span></div>
+      <p class="hint">Convert video, audio, images, PDFs and Office documents. Add files to see the presets that fit them.</p>
+
+      <div id="cv-drop" class="drop">
+        <p>Drop files here, or</p>
+        <button class="ghost" id="cv-add">Add files…</button>
+      </div>
+      <ul id="cv-list" class="file-list"></ul>
+      <div class="row">
+        <div class="field">
+          <span class="field-label" id="cv-pk-label">Preset</span>
+          <!-- The select keeps the value; the picker below shows it with collapsible groups (renderer.js) -->
+          <select id="cv-preset" class="pk-native" tabindex="-1" aria-hidden="true"></select>
+          <div class="pk" id="cv-pk">
+            <button type="button" class="pk-btn" id="cv-pk-btn" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="cv-pk-label cv-pk-val"><span class="pk-val" id="cv-pk-val">Choose a preset</span><span class="pk-caret" aria-hidden="true">▾</span></button>
+            <div class="pk-pop hidden" id="cv-pk-pop">
+              <input type="text" class="pk-filter" id="cv-pk-filter" placeholder="Filter presets…" spellcheck="false" aria-label="Filter presets" />
+              <div class="pk-list" id="cv-pk-list" role="listbox" aria-label="Presets"></div>
+            </div>
+          </div>
+        </div>
+        <label>Hardware encoding (MP4/MKV)
+          <select id="cv-hw">
+            <option value="off">Off (CPU)</option>
+            <option value="cuda">NVIDIA (NVENC)</option>
+            <option value="amf">AMD (AMF)</option>
+          </select>
+        </label>
+      </div>
+      <p id="cv-preset-hint" class="hint small"></p>
+      <div class="row">
+        <button class="primary" id="cv-go">Convert</button>
+        <button class="ghost" id="cv-edit">Edit presets…</button>
+        <button class="ghost" id="cv-reset">Reset presets</button>
+        <button class="ghost" id="cv-reload">Reload presets</button>
+      </div>
+      <p class="hint small" id="cv-engine"></p>
+    </section>
+
+    <!-- Trimmer -->
+    <section class="panel" id="trim">
+      <div class="hud-tag" aria-hidden="true"><span>■ 04* ——— Trimmer</span><span class="sys">LOSSLESS <i class="dia">◆</i><i class="dia">◆</i><i class="dia">◆</i></span></div>
+      <div class="hud-title"><h1>Trimmer</h1><span class="caret" aria-hidden="true"></span><span class="ticks wipe" aria-hidden="true"></span><button type="button" class="ghost tm-open" id="tm-open">Open file…</button></div>
+      <div class="tm-file"><b id="tm-name">No file open</b><span id="tm-info">Drop a video or audio file here, or open one. Mark the parts to keep, then export: no re-encoding needed.</span></div>
+
+      <div class="tm-top">
+        <div class="tm-screen" id="tm-screen">
+          <video id="tm-video" preload="auto"></video>
+          <img class="tm-deco hud-ink" src="assets/hud/crosshair.svg" alt="" aria-hidden="true" />
+          <div class="scanline" aria-hidden="true"></div>
+          <div class="tm-ov tl"><span class="live" aria-hidden="true"></span><span id="tm-pstate">No file</span></div>
+          <div class="tm-ov tr hidden" id="tm-kf"></div>
+          <div class="tm-ov bl"><span id="tm-tc">00:00.00</span><span class="dim"> / <span id="tm-dur">00:00.00</span></span></div>
+          <div class="tm-ov br" id="tm-frame"></div>
+          <span class="tm-brk a" aria-hidden="true"></span><span class="tm-brk b" aria-hidden="true"></span>
+          <div class="tm-busy hidden" id="tm-busy" role="status"><span class="spinner"></span><span id="tm-busy-text"></span></div>
+        </div>
+        <div class="tm-segs">
+          <div class="tm-segs-head"><span>■ Segments</span><span id="tm-segcount">00</span></div>
+          <ol id="tm-seglist" class="tm-seglist"></ol>
+          <div class="tm-segs-foot">
+            <div class="tm-keep"><span id="tm-keeplabel">Keeping</span><b id="tm-keeptotal">—</b></div>
+            <div class="tm-row"><button type="button" class="tool" id="tm-add" title="Add a segment at the playhead">+ Add</button><button type="button" class="tool" id="tm-del" title="Remove the selected segment (Delete)" aria-label="Remove the selected segment">✕</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tm-transport">
+        <button type="button" class="tool" id="tm-pkf" title="Previous keyframe (Shift+←)" aria-label="Previous keyframe">|◂◂</button>
+        <button type="button" class="tool" id="tm-pf" title="Previous frame (←)" aria-label="Previous frame">◂|</button>
+        <button type="button" class="tm-play" id="tm-play" title="Play / pause (Space)" aria-label="Play"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path class="i-play" d="M4 2.5v11L13 8z" fill="currentColor"/><path class="i-pause" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg></button>
+        <button type="button" class="tool" id="tm-nf" title="Next frame (→)" aria-label="Next frame">|▸</button>
+        <button type="button" class="tool" id="tm-nkf" title="Next keyframe (Shift+→)" aria-label="Next keyframe">▸▸|</button>
+        <span class="tm-gap"></span>
+        <button type="button" class="tool" id="tm-in" title="Start the selected segment here (I)"><kbd>I</kbd> Start</button>
+        <button type="button" class="tool" id="tm-out" title="End the selected segment here (O)"><kbd>O</kbd> End</button>
+        <button type="button" class="tool" id="tm-split" title="Split the segment at the playhead (S)"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="4" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 10.5 12 2M10.5 10.5 4 2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>Split</button>
+        <span class="tm-flex"></span>
+        <button type="button" class="tool" id="tm-snap" title="Save this frame as a PNG next to the file" aria-label="Snapshot"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2 5h3l1.5-2h3L11 5h3v8H2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="8" cy="9" r="2.3" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
+        <button type="button" class="tool" id="tm-zout" title="Zoom out" aria-label="Zoom out">−</button>
+        <span class="tm-zoom" id="tm-zoom">1×</span>
+        <button type="button" class="tool" id="tm-zin" title="Zoom in" aria-label="Zoom in">+</button>
+      </div>
+
+      <div class="tm-timeline" id="tm-tl">
+        <div class="tm-trackarea" id="tm-area">
+          <canvas class="tm-ruler" id="tm-ruler" aria-hidden="true"></canvas>
+          <canvas class="tm-kfs" id="tm-kfs" aria-hidden="true"></canvas>
+          <div class="tm-segrow" id="tm-segrow"></div>
+          <canvas class="tm-wave" id="tm-wave" aria-hidden="true"></canvas>
+          <div class="tm-ph" id="tm-ph" aria-hidden="true"></div>
+        </div>
+      </div>
+      <div class="tm-tracks" id="tm-tracks"><span class="tm-lab">Tracks</span></div>
+
+      <div class="tm-bar">
+        <div class="tm-opt"><span class="tm-lab">Cut</span>
+          <div class="tm-seg" role="radiogroup" aria-label="Cut mode">
+            <button type="button" class="chip active" data-cut="keyframe" title="Lossless and instant. Each segment starts on the keyframe at or before its start.">Keyframe</button>
+            <button type="button" class="chip" data-cut="smart" disabled title="Coming soon: lossless except a few frames at each cut">Smart</button>
+            <button type="button" class="chip" data-cut="exact" title="Re-encodes: starts and ends on the exact frame. Slower.">Exact</button>
+          </div></div>
+        <div class="tm-opt"><span class="tm-lab">Segments</span>
+          <div class="tm-seg" role="radiogroup" aria-label="Segments">
+            <button type="button" class="chip active" data-keep="1">Keep</button>
+            <button type="button" class="chip" data-keep="0" title="Export everything except the segments">Cut away</button>
+          </div></div>
+        <div class="tm-opt"><span class="tm-lab">Output</span>
+          <div class="tm-seg" role="radiogroup" aria-label="Output">
+            <button type="button" class="chip" data-merge="0" title="One file per segment">Separate</button>
+            <button type="button" class="chip active" data-merge="1">Merge</button>
+          </div></div>
+        <div class="tm-opt tm-fmt"><span class="tm-lab">Format</span>
+          <select id="tm-fmt" title="Output format: the same as the file (no re-encoding), or a Converter preset"><option value="">Same as input</option></select></div>
+        <button type="button" class="primary" id="tm-go" disabled>Export</button>
+      </div>
+    </section>
+
+    <!-- Compressor -->
+    <section class="panel" id="compress">
+      <div class="hud-tag" aria-hidden="true"><span>■ 05* ——— Compressor</span><span class="sys">SYS.READY <i class="dia">◆</i><i class="dia">◆</i><i class="dia">◆</i></span></div>
+      <div class="hud-title"><h1>Compressor</h1><span class="caret" aria-hidden="true"></span><span class="ticks wipe" aria-hidden="true"></span></div>
+      <p class="hint">Video, audio, images, GIFs and PDFs. Drop a mix: each kind of file has its own settings, and the results are saved next to the originals.</p>
+      <div class="cp-main">
+        <div class="cp-left">
+          <button type="button" class="cp-drop" id="cp-drop"><img class="hud-ink" src="assets/hud/crosshair.svg" alt="" aria-hidden="true" /><span>Drop files or folders</span><span class="dim">· [+] Add…</span></button>
+          <div class="cp-queue">
+            <div class="cp-qhead"><span class="t">Type</span><span class="f">File</span><span class="s">Size → after</span><span class="v">Saved</span><button type="button" class="cp-clear" id="cp-clear" aria-label="Remove every file from the list" title="Clear the list">✕</button></div>
+            <ol class="cp-list" id="cp-list"></ol>
+            <p class="cp-empty" id="cp-empty">No files yet. Drop some here, or use Add.</p>
+          </div>
+        </div>
+        <div class="cp-set">
+          <div class="cp-set-head"><span id="cp-set-title">■ Settings</span><span id="cp-set-count"></span></div>
+          <div class="cp-set-body" id="cp-set-body"></div>
+          <div class="cp-set-foot"><div><span class="tm-lab">This file</span><span id="cp-sel-before">—</span></div><b class="cp-est" id="cp-sel-after"></b></div>
+        </div>
+      </div>
+      <div class="cp-bar">
+        <label class="check cp-keep"><input type="checkbox" id="cp-keep" checked /> Keep the original if the result isn't smaller</label>
+        <div class="cp-dest"><span class="tm-lab">Save to</span><span>Next to the original · <b>name_small.ext</b></span></div>
+        <div class="cp-tot"><span class="tm-lab" id="cp-tot-label">0 files</span><span id="cp-tot">—</span></div>
+        <button type="button" class="primary" id="cp-go" disabled>Compress</button>
+      </div>
+    </section>
+
+
+    <!-- Audio Editor (placeholder: the tools are on the way) -->
+    <section class="panel" id="editor">
+      <div class="hud-tag" aria-hidden="true"><span>■ 06* ——— Audio editor</span><span class="sys">SYS.STANDBY <i class="dia">◆</i><i class="dia">◆</i><i class="dia">◆</i></span></div>
+      <div class="hud-title"><h1>Audio Editor</h1><span class="caret" aria-hidden="true"></span><span class="ticks wipe" aria-hidden="true"></span></div>
+      <p class="hint">Find a song's key and tempo, with editing tools to follow. <span class="soon-tag">Preview</span> These tools are on the way: the controls below don't work yet.</p>
+
+      <div class="ed-drop drop" aria-disabled="true">
+        <p>Drop an audio file here, or</p>
+        <button type="button" class="ghost" disabled>Add file…</button>
+      </div>
+
+      <div class="ed-wave" aria-hidden="true">
+        <div class="ed-wave-head"><span>■ Waveform</span><span class="ed-time">00:00.000 / --:--.---</span></div>
+        <svg class="ed-wave-svg" viewBox="0 0 600 60" preserveAspectRatio="none"><rect x="0" y="23.2" width="3" height="13.6"/><rect x="5" y="23.5" width="3" height="13.0"/><rect x="10" y="20.4" width="3" height="19.1"/><rect x="15" y="22.8" width="3" height="14.3"/><rect x="20" y="19.4" width="3" height="21.1"/><rect x="25" y="19.7" width="3" height="20.7"/><rect x="30" y="21.0" width="3" height="18.0"/><rect x="35" y="16.9" width="3" height="26.1"/><rect x="40" y="19.8" width="3" height="20.3"/><rect x="45" y="15.8" width="3" height="28.4"/><rect x="50" y="18.3" width="3" height="23.3"/><rect x="55" y="17.6" width="3" height="24.8"/><rect x="60" y="13.9" width="3" height="32.3"/><rect x="65" y="9.3" width="3" height="41.4"/><rect x="70" y="16.1" width="3" height="27.7"/><rect x="75" y="14.9" width="3" height="30.2"/><rect x="80" y="10.6" width="3" height="38.8"/><rect x="85" y="7.4" width="3" height="45.3"/><rect x="90" y="11.4" width="3" height="37.1"/><rect x="95" y="13.6" width="3" height="32.8"/><rect x="100" y="8.3" width="3" height="43.3"/><rect x="105" y="17.9" width="3" height="24.2"/><rect x="110" y="10.9" width="3" height="38.2"/><rect x="115" y="16.7" width="3" height="26.5"/><rect x="120" y="18.6" width="3" height="22.9"/><rect x="125" y="19.3" width="3" height="21.3"/><rect x="130" y="18.4" width="3" height="23.1"/><rect x="135" y="15.4" width="3" height="29.2"/><rect x="140" y="20.4" width="3" height="19.2"/><rect x="145" y="18.2" width="3" height="23.6"/><rect x="150" y="18.3" width="3" height="23.4"/><rect x="155" y="20.3" width="3" height="19.5"/><rect x="160" y="19.4" width="3" height="21.2"/><rect x="165" y="22.4" width="3" height="15.2"/><rect x="170" y="22.4" width="3" height="15.1"/><rect x="175" y="21.5" width="3" height="16.9"/><rect x="180" y="18.6" width="3" height="22.9"/><rect x="185" y="19.9" width="3" height="20.2"/><rect x="190" y="20.4" width="3" height="19.2"/><rect x="195" y="18.5" width="3" height="23.1"/><rect x="200" y="19.1" width="3" height="21.8"/><rect x="205" y="19.9" width="3" height="20.2"/><rect x="210" y="16.5" width="3" height="27.1"/><rect x="215" y="17.0" width="3" height="25.9"/><rect x="220" y="20.1" width="3" height="19.8"/><rect x="225" y="18.0" width="3" height="24.0"/><rect x="230" y="18.6" width="3" height="22.8"/><rect x="235" y="16.7" width="3" height="26.6"/><rect x="240" y="18.1" width="3" height="23.7"/><rect x="245" y="21.3" width="3" height="17.4"/><rect x="250" y="18.2" width="3" height="23.7"/><rect x="255" y="23.4" width="3" height="13.3"/><rect x="260" y="22.6" width="3" height="14.7"/><rect x="265" y="20.5" width="3" height="19.0"/><rect x="270" y="22.7" width="3" height="14.6"/><rect x="275" y="20.1" width="3" height="19.8"/><rect x="280" y="22.1" width="3" height="15.8"/><rect x="285" y="17.3" width="3" height="25.4"/><rect x="290" y="15.9" width="3" height="28.3"/><rect x="295" y="16.6" width="3" height="26.8"/><rect x="300" y="13.7" width="3" height="32.6"/><rect x="305" y="17.7" width="3" height="24.5"/><rect x="310" y="14.4" width="3" height="31.2"/><rect x="315" y="15.1" width="3" height="29.8"/><rect x="320" y="15.2" width="3" height="29.6"/><rect x="325" y="16.3" width="3" height="27.4"/><rect x="330" y="13.4" width="3" height="33.1"/><rect x="335" y="13.0" width="3" height="34.1"/><rect x="340" y="17.0" width="3" height="26.0"/><rect x="345" y="16.0" width="3" height="28.0"/><rect x="350" y="20.8" width="3" height="18.4"/><rect x="355" y="16.7" width="3" height="26.6"/><rect x="360" y="17.5" width="3" height="24.9"/><rect x="365" y="15.7" width="3" height="28.6"/><rect x="370" y="17.2" width="3" height="25.7"/><rect x="375" y="20.7" width="3" height="18.5"/><rect x="380" y="20.2" width="3" height="19.5"/><rect x="385" y="18.6" width="3" height="22.9"/><rect x="390" y="22.4" width="3" height="15.1"/><rect x="395" y="19.6" width="3" height="20.8"/><rect x="400" y="21.2" width="3" height="17.6"/><rect x="405" y="21.2" width="3" height="17.5"/><rect x="410" y="21.3" width="3" height="17.4"/><rect x="415" y="15.9" width="3" height="28.2"/><rect x="420" y="20.0" width="3" height="19.9"/><rect x="425" y="18.7" width="3" height="22.6"/><rect x="430" y="17.1" width="3" height="25.8"/><rect x="435" y="12.7" width="3" height="34.6"/><rect x="440" y="18.9" width="3" height="22.2"/><rect x="445" y="15.4" width="3" height="29.1"/><rect x="450" y="14.3" width="3" height="31.4"/><rect x="455" y="11.2" width="3" height="37.6"/><rect x="460" y="11.7" width="3" height="36.5"/><rect x="465" y="11.5" width="3" height="37.0"/><rect x="470" y="16.9" width="3" height="26.2"/><rect x="475" y="16.1" width="3" height="27.9"/><rect x="480" y="17.0" width="3" height="26.0"/><rect x="485" y="13.4" width="3" height="33.1"/><rect x="490" y="13.8" width="3" height="32.5"/><rect x="495" y="20.4" width="3" height="19.2"/><rect x="500" y="20.9" width="3" height="18.2"/><rect x="505" y="21.2" width="3" height="17.5"/><rect x="510" y="22.0" width="3" height="16.1"/><rect x="515" y="21.4" width="3" height="17.2"/><rect x="520" y="21.7" width="3" height="16.5"/><rect x="525" y="23.0" width="3" height="13.9"/><rect x="530" y="23.8" width="3" height="12.4"/><rect x="535" y="21.1" width="3" height="17.7"/><rect x="540" y="21.0" width="3" height="18.1"/><rect x="545" y="19.5" width="3" height="21.1"/><rect x="550" y="16.9" width="3" height="26.3"/><rect x="555" y="18.3" width="3" height="23.5"/><rect x="560" y="19.3" width="3" height="21.5"/><rect x="565" y="18.7" width="3" height="22.7"/><rect x="570" y="18.4" width="3" height="23.3"/><rect x="575" y="22.3" width="3" height="15.5"/><rect x="580" y="17.3" width="3" height="25.4"/><rect x="585" y="18.2" width="3" height="23.6"/><rect x="590" y="17.8" width="3" height="24.4"/><rect x="595" y="18.3" width="3" height="23.3"/></svg>
+        <div class="ed-playhead"></div>
+        <div class="ed-ruler ticks"></div>
+      </div>
+
+      <div class="ed-grid">
+        <section class="ed-card" aria-labelledby="ed-key-h">
+          <div class="ed-card-head"><h2 id="ed-key-h">Key finder</h2><span class="soon-tag">Soon</span></div>
+          <div class="ed-readout"><span class="ed-big">-- ---</span><span class="ed-small">Camelot --</span></div>
+          <p class="hint small">Detects the musical key (e.g. A minor · 8A) and how sure it is, for DJ mixing and harmonic matching.</p>
+          <button type="button" class="primary" disabled>Find key</button>
+        </section>
+        <section class="ed-card" aria-labelledby="ed-bpm-h">
+          <div class="ed-card-head"><h2 id="ed-bpm-h">BPM finder</h2><span class="soon-tag">Soon</span></div>
+          <div class="ed-readout"><span class="ed-big">---.-</span><span class="ed-small">BPM · beat grid --</span></div>
+          <p class="hint small">Detects the tempo and where the beats fall, and can write the BPM into the file's tags.</p>
+          <button type="button" class="primary" disabled>Find BPM</button>
+        </section>
+        <section class="ed-card ed-more" aria-labelledby="ed-more-h">
+          <div class="ed-card-head"><h2 id="ed-more-h">More coming soon</h2><span class="soon-tag">Soon</span></div>
+          <ul class="ed-list">
+            <li>Trim, fade in / out</li>
+            <li>Change pitch and tempo</li>
+            <li>Normalize loudness</li>
+            <li>Split vocals and instruments</li>
+            <li>Edit tags and cover art</li>
+          </ul>
+        </section>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="panel" id="settings">
+      <div class="hud-tag" aria-hidden="true"><span>■ 07* ——— Config</span><span class="sys">SYS.READY <i class="dia">◆</i><i class="dia">◆</i><i class="dia">◆</i></span></div>
+      <div class="hud-title"><h1>Settings</h1><span class="caret" aria-hidden="true"></span><span class="ticks wipe" aria-hidden="true"></span></div>
+      <p class="hint">Saved as soon as you change them.</p>
+
+      <div class="set-group win-only">
+        <h2>Startup</h2>
+        <label class="check"><input id="st-login" type="checkbox" /> Start Nabbit when Windows starts</label>
+        <label class="check sub"><input id="st-min" type="checkbox" /> Start minimized in the system tray</label>
+      </div>
+
+      <div class="set-group">
+        <h2>Window</h2>
+        <label class="check"><input id="st-tray" type="checkbox" /> Keep running in the system tray when the window is closed</label>
+        <p class="hint small">Downloads, conversions and the browser extension keep working while Nabbit is in the tray.</p>
+      </div>
+
+      <div class="set-group">
+        <h2>Appearance</h2>
+        <div class="mu-provider" id="st-theme" role="radiogroup" aria-label="Theme">
+          <button type="button" class="seg" data-theme="system" role="radio">System</button>
+          <button type="button" class="seg" data-theme="light" role="radio">Light</button>
+          <button type="button" class="seg" data-theme="dark" role="radio">Dark</button>
+        </div>
+        <label class="check"><input id="st-fx" type="checkbox" /> Cursor effects (tether lines)</label>
+        <label class="check win-only" id="st-blur-row"><input id="st-blur" type="checkbox" /> Window blur (see-through background, Windows 11)</label>
+      </div>
+
+      <div class="set-group win-only">
+        <h2>File Explorer</h2>
+        <label class="check"><input id="st-shell" type="checkbox" /> Add Nabbit to the right-click menu in File Explorer (Open In Trimmer, Compress, Convert to)</label>
+      </div>
+
+      <div class="set-group">
+        <h2>Streaming</h2>
+        <label>Quality when playing music
+          <select id="st-sq">
+            <option value="low">Low · about 64 kbps (saves data)</option>
+            <option value="normal">Normal · about 128 kbps</option>
+            <option value="high">High · best available</option>
+          </select>
+        </label>
+        <label>Keep up to
+          <select id="st-scache">
+            <option value="256">256 MB of music cached</option>
+            <option value="512">512 MB of music cached</option>
+            <option value="1024">1 GB of music cached</option>
+            <option value="2048">2 GB of music cached</option>
+            <option value="5120">5 GB of music cached</option>
+            <option value="10240">10 GB of music cached</option>
+          </select>
+        </label>
+        <div class="row"><p class="hint small" id="st-scache-info">Cache: empty</p><button type="button" class="ghost" id="st-scache-clear">Clear cache</button></div>
+      </div>
+
+      <div class="set-group">
+        <h2>Downloads</h2>
+        <label>Save downloads to</label>
+        <div class="folder-pick">
+          <input id="st-dir" type="text" readonly />
+          <button type="button" class="ghost" id="st-dir-pick">Browse</button>
+          <button type="button" class="ghost" id="st-dir-reset" title="Use the Downloads folder">Reset</button>
+        </div>
+        <label class="check"><input id="st-ytm" type="checkbox" /> Check YouTube Music for a higher-quality copy of SoundCloud songs and albums</label>
+        <p class="hint small">When you open a SoundCloud song or album, Nabbit looks for the same release on YouTube Music and tells you if its audio is better.</p>
+      </div>
+
+      <div class="set-group">
+        <h2>Converter</h2>
+        <label>Hardware encoding (MP4/MKV)
+          <select id="st-hw">
+            <option value="off">Off (CPU)</option>
+            <option value="cuda">NVIDIA (NVENC)</option>
+            <option value="amf">AMD (AMF)</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="set-group">
+        <h2>Browser extension</h2>
+        <p class="hint small" id="st-ext">No browsers connected.</p>
+        <button type="button" class="ghost" id="st-ext-forget">Disconnect all browsers</button>
+      </div>
+    </section>
+    </div>
+
+    <!-- Music player (player.js): streams with a cache; synced lyrics slide up above it -->
+    <section id="player" class="player hidden" aria-label="Music player">
+      <div id="pl-lyrics" class="pl-lyrics hidden">
+        <div class="pl-lyrics-head"><span>■ Lyrics</span><span id="pl-lyr-note" class="pl-lyr-note"></span></div>
+        <ol id="pl-lines" class="pl-lines"></ol>
+      </div>
+      <div class="pl-row">
+        <div class="pl-art"><img id="pl-art" alt="" /></div>
+        <div class="pl-meta">
+          <button type="button" id="pl-title" class="link-btn pl-title" title="Open this song"></button>
+          <div id="pl-sub" class="pl-sub"></div>
+          <div id="pl-line" class="pl-line"></div>
+        </div>
+        <div class="pl-ctrl">
+          <button type="button" id="pl-prev" class="pl-btn" aria-label="Previous" title="Previous">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 2.5v11M13 2.5 5.5 8 13 13.5z" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
+          <button type="button" id="pl-play" class="pl-btn pl-main" aria-label="Play" title="Play / pause">
+            <svg class="i-play" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 2.5v11L13 8z" fill="currentColor"/></svg>
+            <svg class="i-pause" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg></button>
+          <button type="button" id="pl-next" class="pl-btn" aria-label="Next" title="Next">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13 2.5v11M3 2.5 10.5 8 3 13.5z" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
+        </div>
+        <div class="pl-tools">
+          <span class="pl-eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+          <button type="button" id="pl-lyr" class="pl-tool" aria-pressed="false" title="Synced lyrics">LYRICS</button>
+          <select id="pl-q" title="Streaming quality (cached as you listen)">
+            <option value="low">Low · ~64k</option>
+            <option value="normal">Normal · ~128k</option>
+            <option value="high">High · best</option>
+          </select>
+          <span class="pl-vol">
+            <button type="button" id="pl-mute" class="pl-btn" aria-label="Mute" title="Mute">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z" fill="currentColor"/><path class="i-wave" d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path class="i-x" d="M11 6l4 4m0-4-4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
+            <input id="pl-volume" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="Volume" />
+          </span>
+          <button type="button" id="pl-close" class="pl-btn xbtn" aria-label="Close player" title="Stop and close">✕</button>
+        </div>
+      </div>
+      <div class="pl-prog">
+        <span id="pl-cur" class="pl-time">0:00</span>
+        <div id="pl-bar" class="pl-bar" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="pl-track"><div id="pl-buf" class="pl-buf"></div><div id="pl-fill" class="pl-fill"></div></div>
+          <div id="pl-knob" class="pl-knob"></div>
+        </div>
+        <span id="pl-dur" class="pl-time">0:00</span>
+        <span id="pl-state" class="pl-state"></span>
+      </div>
+    </section>
+
+    <!-- Downloader action bar, docked at the bottom of the window once a video is found -->
+    <div id="dl-bar" class="bottom-bar hidden">
+      <!-- Music extras (single songs and albums) -->
+      <div id="mu-extras" class="bar-extras hidden">
+        <label class="check" title="The album cover, saved inside each file"><input type="checkbox" id="mu-cover-on" checked /> Embed cover art</label>
+        <label class="check" title="Time-synced lyrics from LRCLIB, saved as an .lrc file and in the tags"><input type="checkbox" id="mu-lyrics-on" checked /> Synced lyrics
+          <span class="hint small">from <button type="button" class="link-btn" id="mu-lrclib">LRCLIB</button></span></label>
+      </div>
+      <div class="bar-inner">
+        <!-- Album / playlist options (Get album asks where to save) -->
+        <div id="mu-aopts" class="bar-opts hidden">
+          <span class="bar-label">Format</span>
+          <select id="mu-afmt" title="Format for every track"></select>
+          <select id="mu-aqual" title="Quality"></select>
+          <select id="mu-asr" title="Sample rate"></select>
+          <select id="mu-pack" title="Save as">
+            <option value="folder">Folder</option>
+            <option value="zip">Zip file</option>
+          </select>
+          <span class="opt-size" id="mu-asize" title="Estimated size"></span>
+        </div>
+        <div class="folder-pick" title="Save to">
+          <input id="dl-out" type="text" readonly />
+          <button type="button" class="ghost" data-folder="dl-out">Browse</button>
+        </div>
+        <button type="button" class="ghost pl-start hidden" id="dl-play" title="Play without downloading (cached as it plays)">▶ Play</button>
+        <button class="primary" id="dl-go">Download</button>
+      </div>
+    </div>
+  </main>
+
+  <script src="../downloader/formats.js"></script>
+  <script src="../compressor.js"></script>
+  <canvas id="fx" aria-hidden="true"></canvas>
+  <div id="gbar" aria-hidden="true"></div>
+  <script src="demo-data.js"></script>
+<script src="demo.js"></script>
+<script src="renderer.js"></script>
+  <script src="fx.js"></script>
+  <script src="tips.js"></script>
+  <script src="player.js"></script>
+  <script src="scrub.js"></script>
+  <script src="trim.js"></script>
+  <script src="compress.js"></script>
+  <script src="selects.js"></script>
+</body>
+</html>
