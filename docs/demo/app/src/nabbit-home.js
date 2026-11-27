@@ -79,6 +79,7 @@
           h('span', { className: 'ap-s', textContent: sub ? sub(t) : [t.artist, t.album].filter(Boolean).join(' · ') })),
         h('span', { className: 'd', textContent: clock(t.duration) }));
       row.ondblclick = play;
+      if (t.stream && window.StreamMenu) window.StreamMenu.attach(row, t, list.filter((x) => x.stream));
       row.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); play(); } };
       ol.append(row);
     });
@@ -177,7 +178,7 @@
       if (k.startsWith('p:')) return byPath.get(k.slice(2)) || null;
       return o.item && o.item.url ? { ...o.item, stream: true, playable: true } : null;
     }).filter(Boolean).slice(0, 24);
-    if (again.length) parts.push(grid('again', 'Listen again', again.map((t, i) => tile([picOf(t)], t.title, t.artist || '', () => playIn(again, i)))));
+    if (again.length) parts.push(grid('again', 'Listen again', again.map((t, i) => { const b = tile([picOf(t)], t.title, t.artist || '', () => playIn(again, i)); if (t.stream && window.StreamMenu) window.StreamMenu.attach(b, t, again.filter((x) => x.stream)); return b; })))
 
     // On repeat: most played in the last 30 days.
     const repN = new Map();

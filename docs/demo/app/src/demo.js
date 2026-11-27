@@ -5,7 +5,7 @@
   const on = {}; // event name → listeners
   const listen = (name) => (cb) => { (on[name] ||= []).push(cb); };
   const emit = (name, data) => (on[name] || []).forEach((cb) => { try { cb(data); } catch (e) { console.error(e); } });
-  let st = { slskUser: 'nabbit_demo', slskHasPassword: true, slskPort: 2234, slskOnline: true, isWindows: true, version: '0.1.0', startWithWindows: true, startMinimized: false, closeToTray: true, shellMenu: true,
+  let st = { slskUser: 'nabbit_demo', slskHasPassword: true, slskPort: 2234, slskOnline: true, isWindows: true, version: '0.2.0', startWithWindows: true, startMinimized: false, closeToTray: true, shellMenu: true,
     downloadDir: 'C:\\Users\\you\\Videos\\Nabbit\\Videos', saveLayout: 'nabbit', discordMode: 'songs', discordPicture: 'mine', discordAppId: '', discordAlbum: true, discordTime: true, discordPlay: true, discordHasApp: true, discordConnected: true, discordExact: true, hwAccel: 'cuda', theme: 'dark', blurNow: true, extClients: [{ name: 'Firefox' }] };
   try { const t = localStorage.getItem('nabbit-demo-theme'); if (t) st.theme = t; } catch {}
   // Nabbit Home: some songs already played (Listen again, On repeat), the first time the demo opens.
@@ -183,7 +183,7 @@
       return { sr, pcm: o.noPcm ? null : new Uint8Array(f.buffer), cuts, markers: 0 };
     },
     playFilesInfo: async (paths) => paths.map((p) => { const name = p.split(/[\\/]/).pop(); const ext = (name.split('.').pop() || '').toLowerCase();
-      return { path: p, ext, title: name.replace(/\.[^.]+$/, ''), artist: '', album: '', duration: 40, playable: true, hasCover: false, size: 3e7, mtime: Date.now() }; }),
+      return { path: p, ext, title: name.replace(/\.[^.]+$/, ''), artist: '', album: '', duration: 62.7, playable: true, hasCover: false, size: 3e7, mtime: Date.now() }; }),
     lastfmStatus: async () => ({ key: '', hasSecret: false, user: '', on: true, love: true, pending: 0, connecting: false }),
     lastfmKeys: async () => { throw new Error('Not in the demo.'); }, lastfmConnect: async () => { throw new Error('Not in the demo.'); },
     lastfmCancel: async () => ({}), lastfmDisconnect: async () => ({}), lastfmSet: async (o) => ({ key: '', hasSecret: false, user: '', on: o.on !== false, love: o.love !== false, pending: 0 }),
@@ -203,14 +203,15 @@
         shareCopy: async () => true, shareRevoke: async (t) => { list = list.filter((x) => x.token !== t); return st(); }, onShareStatus: () => {},
       };
     })(),
-    // DJ mode: a made-up tempo and key per song (the sample clip is the same for all of them).
+    // DJ mode: every song plays the same sample track (demo/media/track.mp3: 62.7 s, 138 BPM, first beat at
+    // 0.42 s, found with analyzer.js), so its real beat grid; a made-up key per song, to show the Camelot matching.
     djAnalyze: async (p) => {
       await new Promise((r) => setTimeout(r, 400));
       const h = [...String(p)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
       const keys = [['8A', 'A minor'], ['9A', 'E minor'], ['8B', 'C major'], ['7A', 'D minor'], ['3B', 'D♭ major']];
       const k = keys[h % keys.length];
-      const env = Array.from({ length: 80 }, (_, i) => (i >= 12 && i < 66 ? -10 + Math.sin(i) : -30));
-      return { v: 2, bpm: 118 + (h % 9), offset: 0.12, conf: 0.8, key: k[1], camelot: k[0], keyConf: 0.6, start: 0.2, end: 39.5, duration: 40, env, low: env };
+      const env = Array.from({ length: 80 }, (_, i) => (i >= 1 && i < 79 ? -10 + Math.sin(i) : -30));
+      return { v: 2, bpm: 138, offset: 0.42, conf: 0.9, key: k[1], camelot: k[0], keyConf: 0.6, start: 0.05, end: 62.5, duration: 62.7, env, low: env };
     },
     wavePeaksStream: async () => Array.from({ length: 1200 }, (_, i) => 0.3 + 0.5 * Math.abs(Math.sin(i / 23))),
     fxSource: async () => `${await (await fetch('../mastering.js')).text()}\n${await (await fetch('../player-core.js')).text()}\n${await (await fetch('../pitch.js')).text()}`,
@@ -238,7 +239,13 @@
     musicSearch: async (q, type) => {
       await wait(500);
       if (type === 'songs') return songs.map((t, i) => ({ type: 'songs', title: t, artist: 'Studio B', album: 'Night Drive', year: 2024, duration: 180 + i * 31, url: 'song' + i, thumbnail: covers(0) }));
-      if (type === 'artists') return [{ type: 'artists', title: 'Studio B', subs: '1.2M monthly audience', url: 'artist', thumbnail: covers(4) }];
+      if (type === 'artists') {
+        // The sample artists whose name has what was typed (Studio B first), else Studio B.
+        const pool = ['Studio B', 'Hollow Arcade', 'Glass Harbor', 'Neon Tide', 'Paper Lanterns', 'Night Ferry', 'Velvet Static', 'Moth Radio', 'Silver Coast', 'Dune Club'];
+        const ql = String(q || '').toLowerCase().trim();
+        const hits = pool.filter((n) => ql && n.toLowerCase().includes(ql));
+        return (hits.length ? hits : ['Studio B']).slice(0, 6).map((n, i) => ({ type: 'artists', title: n, subs: `${(1.2 - i * 0.17).toFixed(1)}M monthly audience`, url: n === 'Studio B' ? 'artist' : null, thumbnail: covers(4 + i) }));
+      }
       return [
         { type: 'albums', kind: 'Album', title: 'Night Drive', artist: 'Studio B', year: 2024, url: 'album0', tracks: 6, thumbnail: covers(0) },
         { type: 'albums', kind: 'Album', title: 'Overpass Tapes', artist: 'Studio B', year: 2023, url: 'album1', tracks: 9, thumbnail: covers(1) },
@@ -261,7 +268,7 @@
     musicSource: async () => [{ id: '140', ext: 'm4a', codec: 'AAC', original: false, asr: 44100, kbps: 129 }, { id: '251', ext: 'webm', codec: 'Opus', original: false, asr: 48000, kbps: 141 }],
     musicBetter: async () => null,
     musicFindYtm: async () => null,
-    streamOpen: async (url, q, o = {}) => { await wait(300); return { key: 'k' + url, src: 'demo/track.mp3', cached: true, meta: { duration: 40, ...(o.meta || {}) } }; },
+    streamOpen: async (url, q, o = {}) => { await wait(300); return { key: 'k' + url, src: 'demo/track.mp3', cached: true, meta: { duration: 62.7, ...(o.meta || {}) } }; },
     streamPrefetch: async (url) => { await wait(200); return { key: 'k' + url, src: 'demo/track.mp3', cached: true }; }, streamWarm: async () => true,
     streamAdopt: async () => {}, streamHold: async () => {},
     djAnalyzeStream: async (key) => api.djAnalyze(String(key)),

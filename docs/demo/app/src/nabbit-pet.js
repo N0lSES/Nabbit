@@ -575,6 +575,23 @@
     const b = (now - live.at) / live.period;
     return { n: Math.floor(b), ph: b - Math.floor(b), period: live.period };
   }
+  // The logos (title bar, sidebar) dance too, to the same beat: a nod down on each beat and a sway
+  // over two, a little bigger on the sidebar's. Still when nothing's playing.
+  let logoStill = true;
+  function logoDance(bt) {
+    if (!bt) {
+      if (!logoStill) { for (const img of logos) { img.style.transform = ''; img.classList.remove('dancing'); } logoStill = true; }
+      return;
+    }
+    logoStill = false;
+    const nod = bt.ph < 0.3 ? 1 - bt.ph / 0.3 : 0; // down on the beat, back up by a third of the way
+    const sway = Math.sin(Math.PI * ((((bt.n % 2) + 2) % 2) + bt.ph)); // one way and back over two beats
+    for (const img of logos) {
+      img.classList.add('dancing');
+      const k = (img.clientWidth || 16) / 30; // 1 on the sidebar's 30 px logo
+      img.style.transform = `translateY(${(nod * 2.5 * k).toFixed(2)}px) rotate(${(sway * 7).toFixed(2)}deg) scale(${(1 + nod * 0.06).toFixed(3)}, ${(1 - nod * 0.08).toFixed(3)})`;
+    }
+  }
   let danceX = 0;
   function dance(now, bt) {
     const bar = Math.floor(bt.n / 4), inBar = ((bt.n % 4) + 4) % 4, ph = bt.ph;
@@ -696,6 +713,7 @@
     let key = 'stand', up = 0, rot = 0;
     listen(now);
     const bt = !calm.matches && (state === 'idle' || state === 'go' || state === 'dance') ? beatNow(now) : null;
+    logoDance(calm.matches ? null : (bt || beatNow(now)));
     if (bt && state !== 'dance' && (state === 'idle' || !hop || now - hop.t0 >= CROUCH + AIR + LAND)) { state = 'dance'; hop = null; }
     if (!bt && state === 'dance') { state = 'idle'; until = now + 600; }
     // How far his (turned) square reaches from its middle: the floor and the window's sides are kept

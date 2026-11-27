@@ -14,6 +14,9 @@
   try { mode = localStorage.getItem('nabbit.mode') === 'player' ? 'player' : 'toolbox'; } catch { /* default */ }
   const brandSub = document.querySelector('.brand-sub');
   function setMode(m) {
+    // Back / forward (nav-history.js): Player mode is a place; the Toolbox's places are its tools.
+    if (window.Nav && m === 'player') { const src = window.Sources ? window.Sources.get() : 'local'; window.Nav.record(`src:${src}`, () => { setMode('player'); if (window.Sources) window.Sources.set(src); }); }
+    else if (window.Nav && m === 'toolbox') { const t = document.querySelector('.tab.active'); if (t) window.Nav.record(`tool:${t.dataset.tool}:${t.dataset.mode || ''}`, () => { setMode('toolbox'); t.click(); }); }
     mode = m;
     document.body.classList.toggle('mode-player', m === 'player');
     for (const b of document.querySelectorAll('[data-mode-sw]')) {
@@ -25,7 +28,7 @@
     try { localStorage.setItem('nabbit.mode', m); } catch { /* none */ }
     if (m === 'player' && !loaded) load();
     // The oscilloscope: in the sidebar under the Toolbox / Player switch in Player mode (in place of the
-    // striped bar), on the play bar in the Toolbox.
+    // striped bar); hidden on the Toolbox's play bar (styles.css).
     const osc = $('lp-osc');
     if (osc) {
       if (m === 'player') { const bars = document.querySelector('.brand-bars'); if (bars && osc.previousElementSibling !== bars) bars.after(osc); osc.classList.add('side'); }
@@ -107,6 +110,11 @@
   }
 
   // ---------- Sidebar ----------
+  // Back / forward: this view of Local Files.
+  function navView() {
+    const v = { ...view };
+    if (window.Nav) window.Nav.record(`view:${v.kind}:${v.id || ''}:${v.artist || ''}`, () => { if (mode !== 'player') setMode('player'); view = { ...v }; if (window.Sources && window.Sources.get() !== 'local') window.Sources.set('local'); render(); });
+  }
   function renderSide() {
     const views = [['all', 'Local Files', tracks.length], ['recent', 'Recently added', tracks.filter((t) => t.mtime > Date.now() - 30 * 86400000).length],
       ['loved', 'Loved', tracks.filter((t) => t.loved).length], ['rated', '4 stars and up', tracks.filter((t) => t.rating >= 4).length]];
@@ -117,7 +125,7 @@
       b.type = 'button';
       b.setAttribute('role', 'option');
       b.append(el('span', '', label), el('em', '', n.toLocaleString()));
-      b.addEventListener('click', () => { view = { kind: k, artist: null }; render(); });
+      b.addEventListener('click', () => { view = { kind: k, artist: null }; render(); navView(); });
       vb.append(b);
     }
     const pb = $('lib-pls');
@@ -128,7 +136,7 @@
       b.setAttribute('role', 'option');
       b.title = pl.name;
       b.append(el('span', '', pl.name), el('em', '', pl.items.length.toLocaleString()));
-      b.addEventListener('click', () => { view = { kind: 'playlist', id: pl.id, artist: null }; render(); $('lp-list').scrollTop = 0; });
+      b.addEventListener('click', () => { view = { kind: 'playlist', id: pl.id, artist: null }; render(); $('lp-list').scrollTop = 0; navView(); });
       // Songs dragged from the list onto a playlist are added to it.
       b.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('application/x-nabbit-paths')) { e.preventDefault(); b.classList.add('drop'); } });
       b.addEventListener('dragleave', () => b.classList.remove('drop'));
@@ -152,7 +160,7 @@
       b.setAttribute('role', 'option');
       b.title = name;
       b.append(el('span', '', name), el('em', '', String(n)));
-      b.addEventListener('click', () => { view = view.artist === name ? { kind: 'all', artist: null } : { kind: 'all', artist: name }; render(); $('lp-list').scrollTop = 0; });
+      b.addEventListener('click', () => { view = view.artist === name ? { kind: 'all', artist: null } : { kind: 'all', artist: name }; render(); $('lp-list').scrollTop = 0; navView(); });
       ab.append(b);
     }
     const fb = $('lib-folders');
@@ -1590,6 +1598,15 @@
     }
     if (seq !== loadSeq) return;
     failRun = 0;
+    // A music video swapped for the album's track: its name, album and picture.
+    if (s.replaced && s.replaced.why === 'video') {
+      const r = s.replaced;
+      if (r.title) t.title = r.title;
+      if (r.albumUrl) t.albumUrl = r.albumUrl;
+      if (r.thumbnail) { t.thumbnail = r.thumbnail; t.art = null; }
+      if (r.year && !t.year) t.year = r.year;
+      paintNow(); mediaMeta(t);
+    }
     // Fill gaps (a pasted link or an album track) with what the lookup found.
     if (s.meta || s.art) {
       let more = streamDetails(t, s.meta, s.art);
@@ -1638,9 +1655,10 @@
     let label = text, tip = { stream: 'Playing from the site; saving to the cache as it plays', cached: 'Saved on this PC: plays offline',
       local: 'Downloaded to a temporary file before playing; deleted when the song changes' }[kind] || '';
     if (stream && stream.replaced && ['stream', 'cached', 'local'].includes(kind)) {
-      label = 'Via YT Music';
-      tip = stream.replaced.why === 'blocked' ? "SoundCloud won't play this track here (blocked in your country, private or removed), so this plays the same song from YouTube Music."
-        : "SoundCloud's copy is DRM-protected, so this plays the same song from YouTube Music.";
+      label = stream.replaced.why === 'video' ? 'Album version' : 'Via YT Music';
+      tip = stream.replaced.why === 'video' ? `This was a music video${stream.replaced.from ? ` ("${stream.replaced.from}")` : ''}, so the album's own track plays instead (Settings → Streaming).`
+        : stream.replaced.why === 'blocked' ? "SoundCloud won't play this track here (blocked in your country, private or removed), so this plays the same song from YouTube Music."
+          : "SoundCloud's copy is DRM-protected, so this plays the same song from YouTube Music.";
     }
     $('lp-bar-state').textContent = label;
     $('lp-bar-state').title = tip;
@@ -2145,7 +2163,8 @@
       const b = el('button', 'lp-artist-link', a.name);
       b.type = 'button';
       b.title = `Open ${a.name}'s artist page`;
-      b.addEventListener('click', (e) => { e.stopPropagation(); setMode('toolbox'); goMusic(); if (a.url && typeof openArtist === 'function') openArtist(a.url, { title: a.name }); else openArtistPage(a.name); });
+      // Their page in the YouTube Music (or SoundCloud) tab.
+      b.addEventListener('click', (e) => { e.stopPropagation(); if (a.url && window.Sources && window.Sources.openArtist) window.Sources.openArtist(a.url, { title: a.name }); else openArtistPage(a.name); });
       f.append(b);
     });
     return f;
@@ -2154,7 +2173,9 @@
     const tab = document.querySelector('.tab[data-mode="music"]');
     if (tab && !tab.classList.contains('active')) tab.click();
   }
+  // By name: YouTube Music's best match, opened in the YouTube Music tab.
   function openArtistPage(name) {
+    if (window.Sources && window.Sources.openArtistNamed) { window.Sources.openArtistNamed(String(name).trim()); return; }
     if (!window.nabbitOpenArtist) return;
     setMode('toolbox');
     window.nabbitOpenArtist(String(name).trim());
@@ -2416,6 +2437,10 @@
     },
     /** To the Music Downloader (Toolbox), then fn (e.g. opening an artist's page there). */
     toMusic(fn) { setMode('toolbox'); if (typeof goMusic === 'function') goMusic(); if (fn) fn(); },
+    /** To Player mode. */
+    toPlayer() { if (mode !== 'player') setMode('player'); },
+    /** To the Toolbox. */
+    toToolbox() { if (mode !== 'toolbox') setMode('toolbox'); },
     /** The streamed song playing (null for your own files). */
     get nowPlaying() { return current && current.stream ? current : null; },
     /** Pauses the music (another tool is about to play something). */
@@ -2446,6 +2471,8 @@
       queueSongs(list, next);
       return true;
     },
+    /** Streamed songs (like play()'s) after the current one (next) or at the end of the queue. */
+    queueItems(items, next) { queueSongs((items || []).filter((x) => x && x.url).map((x) => ({ ...x, stream: true, playable: true })), next); },
     /** Your playlists: [{ id, name }]. */
     get playlistList() { return playlists.map((p) => ({ id: p.id, name: p.name })); },
     /** Files from anywhere into a playlist (id), or a new one (no id). */
@@ -2472,7 +2499,7 @@
       start(i);
     },
     /** Opens a view of the library (Local Files): { kind: 'all'|'recent'|'loved'|'rated'|'playlist', id?, artist? }. */
-    openView(v) { view = { kind: v.kind || 'all', id: v.id, artist: v.artist || null }; if (window.Sources) window.Sources.set('local'); render(); $('lp-list').scrollTop = 0; },
+    openView(v) { view = { kind: v.kind || 'all', id: v.id, artist: v.artist || null }; if (window.Sources) window.Sources.set('local'); render(); $('lp-list').scrollTop = 0; navView(); },
     /** Plays files from anywhere (the Toolbox's lists): paths in order, from paths[i]. → false if none can play. */
     async playFiles(paths, i = 0) {
       const want = paths[i];

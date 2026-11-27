@@ -6,6 +6,8 @@
 // Signals run along the wires like nerve impulses; faint neurons fill the background.
 // With Last.fm set up (Settings → Last.fm), your top artists over the period you pick count most, its
 // similar artists join YouTube Music's, and each artist shows its numbers and your plays.
+// Two starts: My taste (all of the above) or Start from scratch (just you: add the artists yourself).
+// Add artists with the search bar or the right-click menu; each start keeps the ones you added.
 (() => {
   const h = (tag, props = {}, ...kids) => { const n = Object.assign(document.createElement(tag), props); n.append(...kids.filter((k) => k != null && k !== '')); return n; };
   const clock = (s) => { s = Math.round(Number(s) || 0); return s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : ''; };
@@ -28,6 +30,16 @@
   let period = '6month';
   try { const v = localStorage.getItem('nabbit.discPeriod'); if (PERIODS.some((x) => x[0] === v)) period = v; } catch { /* default */ }
   const n0 = (x) => Number(x || 0).toLocaleString();
+  // Where the map starts: your taste, or a blank slate. The artists you add are kept for each.
+  const STARTS = [['taste', 'My taste', 'Start from your library, likes and scrobbles'], ['scratch', 'Start from scratch', 'Just you: add the artists yourself']];
+  let start = 'taste';
+  try { const v = localStorage.getItem('nabbit.discStart'); if (STARTS.some((x) => x[0] === v)) start = v; } catch { /* default */ }
+  const addedKey = () => `nabbit.discAdded.${start}`;
+  function addedList() { try { const l = JSON.parse(localStorage.getItem(addedKey()) || '[]'); return Array.isArray(l) ? l.filter((a) => a && a.name) : []; } catch { return []; } }
+  function saveAdded() {
+    const l = nodes.filter((n) => n.added).map((n) => ({ name: n.name, url: n.url || null, thumbnail: n.thumbnail || null }));
+    try { localStorage.setItem(addedKey(), JSON.stringify(l.slice(0, 200))); } catch { /* not kept */ }
+  }
 
   const colors = () => {
     const cs = getComputedStyle(document.documentElement);
@@ -101,6 +113,18 @@
     built = true;
     nodes = []; edges = []; byKey = new Map(); pulses = []; selected = null;
     const you = addNode('__you', { name: 'You', kind: 'you', x: 0, y: 0, fixed: true });
+    if (start === 'scratch') {
+      mine = new Set();
+      lfm = null; paintLastfm();
+      const list = addedList();
+      for (const a of list) placeAdded(a);
+      rescore();
+      paintStatus(list.length ? '' : 'A blank map: search for an artist above, or right-click → Add artist');
+      const queue = nodes.filter((n) => n.added);
+      await Promise.all([0, 1, 2].map(async () => { while (queue.length && running) await grow(queue.shift()); }));
+      paintStatus();
+      return;
+    }
     paintStatus('Reading your taste…');
     let seeds = [];
     try { seeds = await window.api.discSeeds(); } catch { seeds = []; }
@@ -125,11 +149,12 @@
     }
     mine = new Set(all.keys());
     const top = [...all.values()].sort((a, b) => b.weight - a.weight).slice(0, SEEDS);
-    if (!top.length) { paintStatus('Nothing to map yet: add music to your library, or sign in to YouTube Music or SoundCloud.'); return; }
     for (const s of top) {
       const n = addNode(norm(s.name), { name: s.name, url: s.url || null, kind: 'seed', weight: s.weight, sources: s.from, plays: s.plays || 0 });
       link(you, n, 'you');
     }
+    for (const a of addedList()) placeAdded(a);
+    if (!top.length && !nodes.some((n) => n.added)) { paintStatus('Nothing to map yet: add music to your library, sign in to YouTube Music or SoundCloud, or search for an artist above.'); return; }
     // Three at a time, strongest first.
     const queue = nodes.filter((n) => n.kind === 'seed');
     await Promise.all([0, 1, 2].map(async () => { while (queue.length && running) await grow(queue.shift()); }));
@@ -137,6 +162,168 @@
     if (running && style === 'tree') setStyle(style); // fitted to the whole map
 
   }
+
+  // ---------- Adding and removing artists ----------
+  // An artist you added: one of yours, wired to you (an artist already on the map becomes yours).
+  function placeAdded(a, at = null) {
+    const k = norm(a.name);
+    if (!k || k === '__you') return null;
+    const you = byKey.get('__you');
+    let n = byKey.get(k);
+    if (n) {
+      n.kind = 'seed'; n.added = true; n.parent = undefined; n.depth = 1;
+      if (!n.sources || !n.sources.includes('Added by you')) n.sources = [...(n.sources || []), 'Added by you'];
+      n.url = n.url || a.url || null; n.thumbnail = n.thumbnail || a.thumbnail || null;
+    } else {
+      n = addNode(k, { name: a.name, url: a.url || null, thumbnail: a.thumbnail || null, kind: 'seed', added: true, weight: 10, sources: ['Added by you'] });
+      if (at) { n.x = at.x; n.y = at.y; }
+    }
+    mine.add(k);
+    link(you, n, 'you');
+    dirty = true;
+    return n;
+  }
+  async function addArtist(a, at = null) {
+    const n = placeAdded(a, at);
+    if (!n) return;
+    saveAdded();
+    rescore();
+    paintStatus();
+    // In the middle of what's left beside the artist's panel.
+    if (style !== 'tree') { view.x = -n.x - (W > 700 ? 175 / view.k : 0); view.y = -n.y; }
+    select(n);
+    await grow(n);
+  }
+  // Off the map: the artist, and the ones that were only there because of them.
+  function removeNode(n) {
+    if (!n || n.kind === 'you') return;
+    const gone = new Set([n]);
+    let more = true;
+    while (more) {
+      more = false;
+      for (const m of nodes) {
+        if (gone.has(m) || m.kind === 'you' || m.kind === 'seed') continue;
+        if ([...m.from].every((f) => gone.has(f))) { gone.add(m); more = true; }
+      }
+    }
+    for (const m of gone) { byKey.delete(m.key); if (m.added) m.added = false; }
+    nodes = nodes.filter((m) => !gone.has(m));
+    edges = edges.filter((e) => !gone.has(e.a) && !gone.has(e.b));
+    for (const m of nodes) { for (const g of gone) { m.links.delete(g); m.from.delete(g); } if (m.parent && gone.has(m.parent)) m.parent = [...m.from][0]; }
+    mine.delete(n.key);
+    pulses = [];
+    if (selected && gone.has(selected)) select(null);
+    dirty = true;
+    saveAdded();
+    rescore();
+    paintStatus();
+  }
+  function setStart(v) {
+    if (v === start) return;
+    start = v;
+    try { localStorage.setItem('nabbit.discStart', v); } catch { /* not kept */ }
+    if (ui.starts) for (const b of ui.starts.children) b.classList.toggle('active', b.dataset.v === v);
+    built = false;
+    build();
+  }
+
+  // ---------- Search: find an artist to add ----------
+  let findSeq = 0, findTimer = 0, found = [];
+  function paintFound(list, note = '') {
+    const box = ui.found;
+    box.textContent = '';
+    found = list;
+    if (note) box.append(h('div', { className: 'dc-f-note', textContent: note }));
+    list.forEach((a, i) => {
+      const b = h('button', { type: 'button', className: 'dc-f-i' + (i === 0 ? ' first' : ''), title: `Add ${a.name} to the map` },
+        a.thumbnail ? h('img', { src: a.thumbnail, alt: '', loading: 'lazy' }) : h('span', { className: 'dc-f-ph', textContent: a.name.slice(0, 1).toUpperCase() }),
+        h('span', { className: 'dc-f-t' }, h('b', { textContent: a.name }), h('span', { textContent: a.subs || (byKey.has(norm(a.name)) ? 'On the map' : '') })));
+      b.onmousedown = (e) => e.preventDefault(); // the box keeps the focus
+      b.onclick = () => takeFound(a);
+      box.append(b);
+    });
+    box.classList.toggle('hidden', !list.length && !note);
+  }
+  function takeFound(a) {
+    ui.q.value = '';
+    paintFound([]);
+    ui.q.blur();
+    addArtist(a, searchAt);
+    searchAt = null;
+  }
+  let searchAt = null; // where on the map the artist goes (right-click → Add artist here)
+  function findArtists(q) {
+    clearTimeout(findTimer);
+    const my = ++findSeq;
+    if (!q.trim()) { paintFound([]); return; }
+    findTimer = setTimeout(async () => {
+      paintFound([], 'Searching…');
+      let rows = [];
+      try { rows = await window.api.musicSearch(q.trim(), 'artists', 'youtube'); } catch { rows = []; }
+      if (my !== findSeq) return;
+      const list = (rows || []).filter((r) => r && r.title).slice(0, 6).map((r) => ({ name: r.title, url: r.url || null, thumbnail: r.thumbnail || null, subs: r.subs || '' }));
+      // Not found (or offline): add the name as typed.
+      if (!list.some((a) => norm(a.name) === norm(q))) list.push({ name: q.trim(), url: null, thumbnail: null, subs: 'Add as typed', typed: true });
+      paintFound(list);
+    }, 300);
+  }
+  function searchBox() {
+    const q = h('input', { type: 'search', className: 'dc-q', placeholder: 'Add an artist…', spellcheck: false, autocomplete: 'off' });
+    q.setAttribute('aria-label', 'Search for an artist to add to the map');
+    const box = h('div', { className: 'dc-found hidden', role: 'listbox' });
+    q.addEventListener('input', () => findArtists(q.value));
+    q.addEventListener('keydown', (e) => {
+      // Enter: the result named exactly that, else the first one (the best match), else the name as typed.
+      if (e.key === 'Enter') { e.preventDefault(); const t = q.value.trim(); if (!t) return; takeFound(found.find((a) => !a.typed && norm(a.name) === norm(t)) || found[0] || { name: t }); }
+      if (e.key === 'Escape') { q.value = ''; paintFound([]); q.blur(); searchAt = null; }
+      e.stopPropagation(); // typing isn't a player shortcut
+    });
+    q.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== q) ui.found.classList.add('hidden'); }, 150));
+    q.addEventListener('focus', () => { if (ui.found.childElementCount) ui.found.classList.remove('hidden'); });
+    ui.q = q; ui.found = box;
+    return h('div', { className: 'dc-search' }, q, box);
+  }
+
+  // ---------- Right-click menu ----------
+  function closeMenu() { const m = document.querySelector('.dc-ctx'); if (m) m.remove(); }
+  function menu(n, x, y, at) {
+    closeMenu();
+    const m = h('div', { className: 'lp-ctx dc-ctx', role: 'menu' });
+    const item = (label, fn, cls = '') => { const b = h('button', { type: 'button', className: `lp-ctx-i ${cls}`, textContent: label }); b.setAttribute('role', 'menuitem'); b.onclick = () => { closeMenu(); fn(); }; m.append(b); return b; };
+    const sep = () => m.append(h('div', { className: 'lp-ctx-sep' }));
+    const addHere = () => { searchAt = at; ui.q.focus(); ui.q.select(); };
+    if (n && n.kind !== 'you') {
+      m.append(h('div', { className: 'lp-ctx-h', textContent: n.name }));
+      item('Show', () => select(n));
+      const songs = n.info && n.info.songs;
+      item('▶ Play top songs', async () => {
+        if (!n.info) { try { n.info = await window.api.discArtist({ name: n.name, url: n.url || null }); } catch { n.info = null; } }
+        const list = ((n.info && n.info.songs) || []).map(asItem);
+        if (list.length) window.Player.play(list[0], list, 0);
+      });
+      if (!n.grown) item('Grow from here', () => grow(n));
+      if (n.kind !== 'seed' || !n.added) item(n.kind === 'seed' ? 'Keep on the map' : 'Add to my artists', () => addArtist(n));
+      if (n.url || (n.info && n.info.url)) item('Artist page', () => window.Sources.openArtist(n.url || n.info.url, { title: n.name, thumbnail: n.thumbnail }));
+      sep();
+      item('Add artist…', addHere);
+      item('Remove from the map', () => removeNode(n));
+    } else {
+      item('Add artist…', addHere);
+      if (n && n.kind === 'you') item('Centre', () => setStyle(style));
+      sep();
+      item(start === 'scratch' ? 'Clear the map' : 'Start from scratch', () => { if (start === 'scratch') { try { localStorage.removeItem(addedKey()); } catch { /* fine */ } built = false; build(); } else setStart('scratch'); });
+      if (start === 'scratch') item('Map my taste instead', () => setStart('taste'));
+      else item('Remap my taste', () => { built = false; build(); });
+      item('Centre', () => setStyle(style));
+    }
+    document.body.append(m);
+    const r = m.getBoundingClientRect();
+    m.style.left = `${Math.max(4, Math.min(x, window.innerWidth - r.width - 8))}px`;
+    m.style.top = `${Math.max(4, Math.min(y, window.innerHeight - r.height - 8))}px`;
+    const first = m.querySelector('button'); if (first) first.focus();
+  }
+  document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.dc-ctx')) closeMenu(); }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 
   // ---------- Layout ----------
   // Brain: a small force simulation. Tree: worked-out places the artists glide to.
@@ -350,6 +537,7 @@
   function wire() {
     let pan = null, moved = false;
     canvas.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return; // right-click: the menu
       const [px, py] = at(ev), n = pick(px, py);
       moved = false;
       canvas.setPointerCapture(ev.pointerId);
@@ -364,6 +552,7 @@
       if (n !== hover) { hover = n; canvas.style.cursor = n ? 'pointer' : 'grab'; canvas.title = n && n.kind !== 'you' ? `${n.name}${n.kind === 'new' ? ` · from ${[...n.from].map((f) => f.name).slice(0, 3).join(', ')}` : ''}` : ''; }
     });
     canvas.addEventListener('pointerup', (ev) => {
+      if (ev.button !== 0) return;
       const [px, py] = at(ev), n = pick(px, py);
       if (!moved && n && n.kind !== 'you') select(n);
       else if (!moved && !n) select(null);
@@ -372,6 +561,11 @@
     canvas.addEventListener('pointerleave', () => { hover = null; });
     canvas.addEventListener('wheel', (ev) => { ev.preventDefault(); view.k = Math.max(0.25, Math.min(3, view.k * (ev.deltaY < 0 ? 1.12 : 1 / 1.12))); }, { passive: false });
     canvas.addEventListener('dblclick', (ev) => { const [px, py] = at(ev); pop(pick(px, py)); });
+    canvas.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      const [px, py] = at(ev);
+      menu(pick(px, py), ev.clientX, ev.clientY, { x: (px - W / 2) / view.k - view.x, y: (py - H / 2) / view.k - view.y });
+    });
   }
   // A new view: its own layout; the tree starts fitted (or at its top).
   function setStyle(v) {
@@ -404,6 +598,7 @@
   function paintLastfm() {
     if (!ui.lf) return;
     ui.lf.textContent = '';
+    if (start === 'scratch') return;
     if (!lfm || !lfm.on) { ui.lf.append(h('span', { className: 'dc-lfoff', textContent: 'Last.fm: set it up in Settings → Last.fm to map your scrobbles too' })); return; }
     const since = lfm.since ? ` since ${new Date(lfm.since * 1000).getFullYear()}` : '';
     ui.lf.append(h('span', { className: 'dc-lfme', textContent: `Last.fm · ${lfm.user}${lfm.scrobbles ? ` · ${n0(lfm.scrobbles)} scrobbles${since}` : ''}${lfm.artists ? ` · ${n0(lfm.artists)} artists` : ''}` }));
@@ -440,7 +635,8 @@
     p.classList.remove('hidden');
     p.textContent = '';
     const a = n.info || {};
-    const why = n.kind === 'seed' ? `In your ${(n.sources || ['Library']).join(' and ')}` : n.kind === 'known' ? 'Already in your library' : `Because you listen to ${[...n.from].map((f) => f.name).slice(0, 4).join(', ')}`;
+    const src = (n.sources || ['Library']).filter((x) => x !== 'Added by you');
+    const why = n.kind === 'seed' ? (src.length ? `In your ${src.join(' and ')}${n.added ? ' · added by you' : ''}` : 'Added by you') : n.kind === 'known' ? 'Already in your library' : `Because you listen to ${[...n.from].map((f) => f.name).slice(0, 4).join(', ')}`;
     const close = h('button', { type: 'button', className: 'lp-txt dim dc-x', textContent: '✕', title: 'Close' });
     close.onclick = () => select(null);
     p.append(h('div', { className: 'dc-head' },
@@ -460,7 +656,7 @@
     const row = h('div', { className: 'dc-acts' });
     if (songs.length) { const b = h('button', { type: 'button', className: 'ghost', textContent: '▶ Top songs' }); b.onclick = () => { const q = songs.map(asItem); window.Player.play(q[0], q, 0); }; row.append(b); }
     if (!n.grown) { const b = h('button', { type: 'button', className: 'ghost', textContent: 'Grow from here' }); b.title = 'Add the artists their fans like to the map'; b.onclick = () => { grow(n); b.remove(); }; row.append(b); }
-    if (a.url) { const b = h('button', { type: 'button', className: 'ghost', textContent: 'Artist page' }); b.onclick = () => window.Player.toMusic(() => { if (typeof openArtist === 'function') openArtist(a.url, { title: a.name }); }); row.append(b); }
+    if (a.url) { const b = h('button', { type: 'button', className: 'ghost', textContent: 'Artist page' }); b.onclick = () => window.Sources.openArtist(a.url, { title: a.name, thumbnail: a.thumbnail }); row.append(b); }
     p.append(row);
     if (!n.info) { p.append(h('p', { className: 'hm-note', textContent: 'Looking them up…' })); return; }
     const list = h('ol', { className: 'ap-songs dc-songs' });
@@ -472,6 +668,7 @@
         h('span', { className: 'ap-st' }, h('span', { className: 'ap-t', textContent: t.title }), h('span', { className: 'ap-s', textContent: [t.album, t.year].filter(Boolean).join(' · ') })),
         h('span', { className: 'd', textContent: clock(t.duration) }));
       li.ondblclick = play;
+      if (window.StreamMenu) window.StreamMenu.attach(li, { ...t, artist: t.artist || a.name || n.name, artistLinks: t.artistLinks || (a.url ? [{ name: a.name || n.name, url: a.url }] : []) }, songs);
       list.append(li);
     });
     if (songs.length) p.append(list); else p.append(h('p', { className: 'hm-note', textContent: 'No songs listed for them.' }));
@@ -497,6 +694,7 @@
       ctx = canvas.getContext('2d');
       const again = h('button', { type: 'button', className: 'lp-txt dim', textContent: 'Remap', title: 'Read your taste again and start a new map' });
       again.onclick = () => { built = false; build(); };
+      again.title = 'Read your taste again and start a new map (Start from scratch: start again from the artists you added)';
       const center = h('button', { type: 'button', className: 'lp-txt dim', textContent: 'Centre', title: 'Back to you' });
       center.onclick = () => setStyle(style);
       ui = {
@@ -505,7 +703,14 @@
         styles: h('span', { className: 'tm-seg dc-styles', role: 'radiogroup', ariaLabel: 'View' }),
         picks: h('div', { className: 'dc-picks' }),
         panel: h('aside', { className: 'dc-panel hidden' }),
+        starts: h('span', { className: 'tm-seg dc-styles dc-starts', role: 'radiogroup', ariaLabel: 'Start from' }),
       };
+      for (const [v, label, tip] of STARTS) {
+        const b = h('button', { type: 'button', className: 'chip' + (v === start ? ' active' : ''), textContent: label, title: tip });
+        b.dataset.v = v;
+        b.onclick = () => setStart(v);
+        ui.starts.append(b);
+      }
       for (const [v, label, tip] of STYLES) {
         const b = h('button', { type: 'button', className: 'chip' + (v === style ? ' active' : ''), textContent: label, title: tip });
         b.dataset.v = v;
@@ -513,7 +718,7 @@
         ui.styles.append(b);
       }
       root.dataset.style = style;
-      root.append(canvas, h('div', { className: 'dc-top' }, ui.status, h('span', { className: 'lp-sp' }), ui.styles, center, again), ui.lf, ui.picks, ui.panel);
+      root.append(canvas, h('div', { className: 'dc-top' }, searchBox(), ui.starts, ui.status, h('span', { className: 'lp-sp' }), ui.styles, center, again), ui.lf, ui.picks, ui.panel);
       container.append(root);
       ro.disconnect(); ro.observe(root);
       resize();
@@ -524,6 +729,6 @@
       raf = requestAnimationFrame(loop);
       if (!built) build(); else { rescore(); paintStatus(); paintLastfm(); if (selected) paintPanel(selected); }
     },
-    stop() { running = false; cancelAnimationFrame(raf); ro.disconnect(); root = null; },
+    stop() { running = false; cancelAnimationFrame(raf); ro.disconnect(); root = null; closeMenu(); },
   };
 })();

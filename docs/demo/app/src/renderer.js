@@ -10,6 +10,8 @@ document.querySelectorAll('.tab').forEach((tab) =>
     document.querySelectorAll('.tab, .panel').forEach((el) => el.classList.remove('active'));
     tab.classList.add('active');
     $(tab.dataset.tool).classList.add('active');
+    // Back / forward (nav-history.js): this tool, in the Toolbox.
+    if (window.Nav) window.Nav.record(`tool:${tab.dataset.tool}:${tab.dataset.mode || ''}`, () => { if (window.Player && window.Player.toToolbox) window.Player.toToolbox(); tab.click(); });
   })
 );
 
@@ -602,6 +604,25 @@ $('dl-go').onclick = async () => {
     (plan && plan.post && plan.post.videoKbps ? ` · ${Formats.formatKbps(plan.post.videoKbps)}` : ''));
 };
 
+// One click (right-click a streamed song → Download): the song in the format picked for albums last
+// (else FLAC from YouTube Music, the original file from SoundCloud), to the folder music was saved to
+// last, with cover art and lyrics as set in the Music Downloader. No folder prompt.
+async function quickDownloadSong(t) {
+  if (!t || !t.url) return;
+  const sc = /soundcloud\.com/i.test(t.url);
+  let format = muAfmtTouched ? $('mu-afmt').value : '';
+  if (!format || (sc && /^best:/.test(format))) format = sc ? 'orig:best' : 'best:flac';
+  let outDir = '';
+  try { outDir = localStorage.getItem('muDir') || ''; } catch {}
+  if (!outDir) outDir = (await window.api.musicFolder().catch(() => '')) || $('dl-out').value;
+  if (!outDir) return;
+  const name = [t.artist, t.title].filter(Boolean).join(' - ') || 'song';
+  await start('download', { url: t.url, music: true, format, cover: $('mu-cover-on').checked, lyrics: $('mu-lyrics-on').checked, outDir },
+    `Music · ${t.title || name}`);
+  if (window.Player && window.Player.toast) window.Player.toast(`Downloading ${name}`);
+}
+window.quickDownloadSong = quickDownloadSong;
+
 // ---------- Thumbnail download (hover icon on the card's thumbnail) ----------
 function closeThumbMenu() {
   $('dl-thumb-menu').classList.add('hidden');
@@ -1178,6 +1199,7 @@ document.querySelectorAll('#mu-provider .seg').forEach((b) => b.addEventListener
 // "Search on Soulseek" (right-click menus, src/file-actions.js): the Music Downloader, on Soulseek,
 // searching for songs with these words.
 window.nabbitSlskSearch = (query) => {
+  if (window.Player && window.Player.toToolbox) window.Player.toToolbox(); // from Player mode too
   const tab = document.querySelector('.tab[data-mode="music"]');
   if (tab && !tab.classList.contains('active')) tab.click();
   if (PROVIDERS.soulseek && muProvider !== 'soulseek') setProvider('soulseek');
@@ -1257,6 +1279,7 @@ function renderResults(results) {
       row.dataset.playUrl = r.url;
       const songs = (results || []).filter((x) => x.type === 'songs' && x.url);
       row.prepend(playButton(() => window.Player.play(playItem(r), songs.map(playItem)), `Play ${r.title}`, null, r.url));
+      if (window.StreamMenu) window.StreamMenu.attach(row, r, songs); // right-click: play, download, Soulseek, artist, album
     }
     if (r.type === 'artists') {
       row.classList.add('artist-row');
@@ -1320,6 +1343,7 @@ function markOpenResult(url) {
   document.querySelectorAll('#mu-results .result').forEach((row) => row.classList.toggle('active', !!url && row.dataset.url === url));
 }
 async function musicOpen(url, hint = null, fromResults = false) {
+  if (window.Nav) window.Nav.record(`dl-open:${url}`, () => { if (window.Player && window.Player.toToolbox) window.Player.toToolbox(); const t = document.querySelector('.tab[data-mode="music"]'); if (t && !t.classList.contains('active')) t.click(); musicOpen(url, hint, fromResults); });
   const seq = ++dlSearchSeq;
   hideBetter();
   muFromResults = fromResults && !!(muResults && muResults.length);
@@ -1480,6 +1504,7 @@ window.nabbitOpenArtist = async (name) => {
   }
 };
 async function openArtist(url, hint = null) {
+  if (window.Nav) window.Nav.record(`dl-artist:${url}`, () => { if (window.Player && window.Player.toToolbox) window.Player.toToolbox(); const t = document.querySelector('.tab[data-mode="music"]'); if (t && !t.classList.contains('active')) t.click(); openArtist(url, hint); });
   const seq = ++dlSearchSeq;
   showMusicView(null);
   dlInfo = null;
@@ -1506,8 +1531,20 @@ const el = (tag, props = {}, ...kids) => { const n = Object.assign(document.crea
 function renderArtist(a) {
   muArtist = a;
   muAlbum = null;
-  const page = $('mu-artist-page');
+  buildArtistPage(a, $('mu-artist-page'));
+  markPlaying();
+  showMusicView('artist');
+  document.querySelector('.content').scrollTop = 0;
+}
+// An artist's page (header, then songs as rows and the rest as tiles) into page. o: what clicks do:
+// openArtist(url, t) for a related artist, openItem(t) for a song / album (row or tile), playSong(t, list)
+// for a song's ▶, top (an element above the header, e.g. a Back button), extra (more header buttons).
+// The Music Downloader opens them in its own views; Player mode's YouTube Music / SoundCloud tabs play them.
+function buildArtistPage(a, page, o = {}) {
+  const openA = o.openArtist || ((url, t) => openArtist(url, t));
+  const openI = o.openItem || ((t) => openFromArtist(t));
   page.innerHTML = '';
+  if (o.top) page.append(o.top);
   const where = a.provider === 'soundcloud' ? 'SoundCloud' : 'YouTube Music';
   // Header: picture in brackets, name, followers, bio, link out
   const desc = a.description ? el('p', { className: 'ap-desc', textContent: a.description, title: 'Click to show more or less' }) : null;
@@ -1521,7 +1558,7 @@ function renderArtist(a) {
       el('h2', { className: 'ap-name', textContent: a.name || 'Artist' }),
       a.subs ? el('div', { className: 'meta-line', textContent: a.subs }) : null,
       desc,
-      out)));
+      o.extra ? el('div', { className: 'ap-btns' }, out, ...o.extra) : out)));
   // Sections: songs as rows, the rest as tiles (first 10, then "+ N more")
   for (const sec of a.sections || []) {
     const box = el('section', { className: 'ap-sec' });
@@ -1537,8 +1574,10 @@ function renderArtist(a) {
             el('span', { className: 'ap-s', textContent: [t.album, t.year].filter(Boolean).join(' · ') })),
           el('span', { className: 'd', textContent: clock(t.duration) }));
         row.dataset.playUrl = t.url;
-        row.onclick = () => openFromArtist(t);
-        row.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFromArtist(t); } };
+        if (window.StreamMenu) window.StreamMenu.attach(row, { ...t, artist: t.artist || a.name, artistLinks: t.artistLinks && t.artistLinks.length ? t.artistLinks : [{ name: a.name, url: a.url }] }, sec.items);
+        if (o.itemTitle) row.title = o.itemTitle(t);
+        row.onclick = () => openI(t, sec.items, row);
+        row.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openI(t, sec.items, row); } };
         list.append(row);
       });
       box.append(list);
@@ -1549,8 +1588,8 @@ function renderArtist(a) {
           el('span', { className: 'ap-art' }, t.thumbnail ? el('img', { src: t.thumbnail, alt: '', loading: 'lazy' }) : null),
           el('span', { className: 'ap-t', textContent: t.title }),
           el('span', { className: 'ap-s', textContent: t.type === 'artists' ? (t.subs || 'Artist') : [t.kind, t.year].filter(Boolean).join(' · ') }));
-        tile.title = t.type === 'artists' ? `Open ${t.title}'s artist page` : `Open ${t.title}`;
-        tile.onclick = () => (t.type === 'artists' ? openArtist(t.url, t) : openFromArtist(t));
+        tile.title = t.type === 'artists' ? `Open ${t.title}'s artist page` : o.itemTitle ? o.itemTitle(t) : `Open ${t.title}`;
+        tile.onclick = () => (t.type === 'artists' ? openA(t.url, t) : openI(t, sec.items, tile));
         grid.append(tile);
       });
       box.append(grid);
@@ -1564,9 +1603,8 @@ function renderArtist(a) {
   }
   if (!(a.sections || []).length) page.append(el('p', { className: 'hint', textContent: 'Nothing to list on this artist\'s page.' }));
   markPlaying();
-  showMusicView('artist');
-  document.querySelector('.content').scrollTop = 0;
 }
+window.nabbitArtistPage = buildArtistPage;
 
 // Songs and albums from an artist page open in their usual views, with "Back to <artist>".
 function openFromArtist(item) {
@@ -1875,6 +1913,7 @@ function showSettings(st) {
   $('st-hw').value = st.hwAccel;
   $('st-sq').value = st.streamQuality || 'normal';
   $('st-pd').checked = st.playDownload !== false;
+  $('st-albumtracks').checked = st.preferAlbumTracks !== false;
   $('st-scache').value = String(st.streamCacheMB ?? 1024);
   $('cv-hw').value = st.hwAccel;
   document.querySelectorAll('#st-theme .seg').forEach((b) => {
@@ -1887,6 +1926,7 @@ function showSettings(st) {
     ? `${n} browser${n > 1 ? 's' : ''} connected: ${st.extClients.map((c) => c.name || 'Browser').join(', ')}.`
     : 'No browsers connected. Install the Nabbit extension and click Connect in its popup.';
   $('st-ext-forget').disabled = !n;
+  if (window.AddonPromo) window.AddonPromo.update(st.extClients);
   $('app-version').textContent = `v${st.version}`;
 }
 async function saveSetting(patch, box) {
@@ -1921,6 +1961,7 @@ $('st-shell').onchange = (e) => saveSetting({ shellMenu: e.target.checked }, e.t
 $('st-hw').onchange = (e) => saveSetting({ hwAccel: e.target.value });
 $('st-sq').onchange = (e) => saveSetting({ streamQuality: e.target.value });
 $('st-pd').onchange = (e) => saveSetting({ playDownload: e.target.checked });
+$('st-albumtracks').onchange = (e) => saveSetting({ preferAlbumTracks: e.target.checked }, e.target);
 $('st-scache').onchange = async (e) => { await saveSetting({ streamCacheMB: Number(e.target.value) }); cacheInfo(); };
 async function cacheInfo() {
   const i = await window.api.streamCacheInfo();
