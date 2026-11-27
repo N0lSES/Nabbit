@@ -86,7 +86,7 @@ function jobsCount() {
   // Clear all: only when something has finished; the empty note when nothing's left.
   $('jobs-clear').classList.toggle('hidden', !all.some((el) => !jobRunning(el)));
   if (!all.length && !document.querySelector('#jobs .empty')) {
-    setTimeout(() => { if (!jobEls.size && !document.querySelector('#jobs .empty')) $('jobs').append(Object.assign(document.createElement('p'), { className: 'empty', textContent: 'No jobs yet.' })); }, 240);
+    setTimeout(() => { if (!jobEls.size && !document.querySelector('#jobs .empty')) $('jobs').append(Object.assign(document.createElement('p'), { className: 'empty', textContent: 'Nothing running.' })); }, 240);
   }
 }
 
@@ -123,6 +123,8 @@ window.api.onDone(({ id, ok, output, outputs, error }) => {
     ? (outputs && outputs.length > 1 ? `Done · ${outputs.length} files` : 'Done')
     : error;
   if (ok) el.querySelector('.bar > div').style.width = '100%';
+  // A finished job leaves "Now" after a moment: its files are in "Done" below. Failed ones stay.
+  if (ok) setTimeout(() => { if (jobEls.get(id) === el) removeJob(id); }, 4000);
   const actions = el.querySelector('.job-actions');
   actions.innerHTML = '';
   if (ok && output) {
@@ -486,6 +488,7 @@ async function dlSearch() {
   $('dl-url').value = url;
   if (!url || /^https?:\/\/$/i.test(url)) return $('dl-url').focus();
   // Music Downloader: words → search; a link → song card or album view.
+  if (dlMode === 'music' && muProvider === 'soulseek') return slskInput(url);
   if (dlMode === 'music') return /^https?:\/\//i.test(url) ? musicOpen(url) : musicSearch(url);
   const seq = ++dlSearchSeq;
   $('dl-card').classList.add('hidden');
@@ -503,6 +506,13 @@ async function dlSearch() {
     if (seq !== dlSearchSeq) return;
     const msg = e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
     if (msg === 'cancelled') dlState(null);
+    // A DRM music link in the Video Downloader: the Music Downloader finds it on YouTube Music.
+    else if (/\bDRM\b/i.test(msg)) {
+      $('dl-search').disabled = false;
+      document.querySelector('.tab[data-mode="music"]').click();
+      $('dl-url').value = url;
+      return musicOpen(url);
+    }
     else dlState('error', msg);
   } finally {
     if (seq === dlSearchSeq) $('dl-search').disabled = false;
@@ -790,7 +800,7 @@ function cascadeAudio() {
   if (!videoNone && !gif && groups.length) groups.push({ value: NONE, label: 'None (video only)' });
   if (!groups.length) return disableSelects(['dl-afmt', ...ids], 'No audio');
   let auto = audioTouched ? undefined : (Formats.matchingAudioKey(p, vc.kind === 'original' ? videoValue : null) || undefined);
-  // Music from YouTube: start on "Highest quality possible" (FLAC).
+  // Music from YouTube: start on "Highest quality" (FLAC).
   if (!audioTouched && dlMode === 'music' && videoNone && groups.some((g) => (g.items || []).some((i) => i.value === 'best:flac'))) auto = 'best:flac';
   const value = fillSelect($('dl-afmt'), groups, auto);
   if (value === NONE) return disableSelects(ids, '—');
@@ -843,9 +853,10 @@ function updateSelection() {
   const v = selectedVideo();
   const a = v && v.hasAudio ? null : selectedAudio();
   $('dl-vsize').textContent = v && videoKind() === 'convert' ? sizeFromKbps(kbpsValue('dl-vbr')) : rowSize(v, $('dl-vfmt').value, videoTransform);
-  const bestOut = a && Formats.parseChoice($('dl-afmt').value).kind === 'best' ? Formats.bestOutcome(a) : null;
+  const bestC = Formats.parseChoice($('dl-afmt').value);
+  const bestOut = a && bestC.kind === 'best' ? Formats.bestOutcome(a, bestC.ext) : null;
   $('dl-asize').textContent = bestOut && !bestOut.keep
-    ? Formats.formatBytes(Formats.losslessSize(a.asr || 48000, bestOut.bits || 24, dlFormats.duration, 'flac')) || 'FLAC'
+    ? (bestOut.ext === 'mp3' ? sizeFromKbps(320) : Formats.formatBytes(Formats.losslessSize(bestOut.rate || 48000, bestOut.bits || 16, dlFormats.duration, 'flac')) || 'FLAC')
     : a && losslessAudio()
     ? Formats.formatBytes(Formats.losslessSize(Number($('dl-asr').value) || a.asr, Number($('dl-abits').value) || 16, dlFormats.duration, Formats.parseChoice($('dl-afmt').value).ext)) || 're-encoded'
     : a && audioConverting() ? sizeFromKbps(kbpsValue('dl-abr')) : rowSize(a, $('dl-afmt').value);
@@ -866,11 +877,11 @@ function updateSelection() {
     // Music: format · sample rate · bitrate (or bit depth).
     const c = Formats.parseChoice($('dl-afmt').value);
     const lossless = audioConverting() && Formats.LOSSLESS.includes(c.ext);
-    const bo = c.kind === 'best' ? Formats.bestOutcome(a) : null;
+    const bo = c.kind === 'best' ? Formats.bestOutcome(a, c.ext) : null;
     tech.resolution = c.kind === 'original' ? a.codec : bo && bo.keep ? bo.ext.toUpperCase() : c.ext.toUpperCase();
-    const rate = audioConverting() && /^\d+$/.test($('dl-asr').value) ? Number($('dl-asr').value) : a.asr;
+    const rate = bo && !bo.keep ? bo.rate : audioConverting() && /^\d+$/.test($('dl-asr').value) ? Number($('dl-asr').value) : a.asr;
     tech.fps = rate ? khz(rate) : null;
-    tech.bitrate = bo && !bo.keep ? `Lossless${bo.bits ? ` · ${bo.bits}-bit` : ''}` : lossless ? `Lossless · ${Number($('dl-abits').value) || 16}-bit`
+    tech.bitrate = bo && !bo.keep ? (bo.ext === 'mp3' ? '320 kbps' : `Lossless${bo.bits ? ` · ${bo.bits}-bit` : ''}`) : lossless ? `Lossless · ${Number($('dl-abits').value) || 16}-bit`
       : audioConverting() ? (kbpsValue('dl-abr') ? `${kbpsValue('dl-abr')} kbps` : null) : Formats.formatKbps(a.kbps);
   } else if (!v && a && audioConverting()) {
     const lossless = Formats.LOSSLESS.includes(Formats.parseChoice($('dl-afmt').value).ext);
@@ -895,11 +906,11 @@ function sourceText(a) {
   return `Source: ${[a.codec, a.asr ? khz(a.asr) : null, Formats.formatKbps(a.kbps)].filter(Boolean).join(' · ')}`;
 }
 // What "Highest quality possible" makes from that source.
-function bestText(a) {
-  const o = Formats.bestOutcome(a);
+function bestText(a, ext = 'flac') {
+  const o = Formats.bestOutcome(a, ext);
   if (!o) return '';
   if (o.keep) return `kept as ${o.ext.toUpperCase()}`;
-  return `FLAC${o.bits ? ` · ${o.bits}-bit` : ''}${a.asr ? ` · ${khz(a.asr)}` : ''}`;
+  return o.ext === 'mp3' ? `MP3 · 320 kbps · ${khz(o.rate)}` : `FLAC${o.bits ? ` · ${o.bits}-bit` : ''} · ${khz(o.rate)}`;
 }
 function sourceWarning(a, { ext, kbps, rate }) {
   if (!a || a.original) return null;
@@ -979,7 +990,7 @@ const dlSaved = { video: null, music: null };
 const SEL_IDS = ['dl-vfmt', 'dl-vres', 'dl-vfps', 'dl-vbr', 'dl-afmt', 'dl-asr', 'dl-abr', 'dl-abits'];
 const MODE_TEXT = {
   video: ['Video Downloader', 'Paste a link to a video you have the right to download.'],
-  music: ['Music Downloader', 'Search YouTube Music or SoundCloud for songs, albums or playlists, or paste a link to music you have the right to download. Only the audio is saved, tagged with cover art and lyrics.'],
+  music: ['Music Downloader', 'Search YouTube Music, SoundCloud or Soulseek for songs, albums or playlists, or paste a link to music you have the right to download. Only the audio is saved, tagged with cover art and lyrics.'],
 };
 
 function setDlMode(mode) {
@@ -1061,7 +1072,7 @@ function markPlaying() {
 
 // ---------- Music Downloader: search results and albums ----------
 let muType = 'songs';   // what to search for: songs | albums | playlists
-const PROVIDERS = { ytmusic: 'YouTube Music', soundcloud: 'SoundCloud' };
+const PROVIDERS = { ytmusic: 'YouTube Music', soundcloud: 'SoundCloud', soulseek: 'Soulseek' };
 let muProvider = 'ytmusic'; // where to search: ytmusic | soundcloud (remembered between runs)
 try { if (PROVIDERS[localStorage.getItem('muProvider')]) muProvider = localStorage.getItem('muProvider'); } catch {}
 let muResults = null;   // last search results
@@ -1103,9 +1114,9 @@ function showMusicView(view) {
   updateDlBar();
 }
 
-document.querySelectorAll('#mu-types .chip').forEach((chip) => chip.addEventListener('click', () => {
+document.querySelectorAll('#mu-types .chip[data-type]').forEach((chip) => chip.addEventListener('click', () => {
   muType = chip.dataset.type;
-  document.querySelectorAll('#mu-types .chip').forEach((c) => {
+  document.querySelectorAll('#mu-types .chip[data-type]').forEach((c) => {
     c.classList.toggle('active', c === chip);
     c.setAttribute('aria-checked', String(c === chip));
   });
@@ -1133,6 +1144,7 @@ document.querySelectorAll('#mu-provider .seg').forEach((b) => b.addEventListener
 }));
 
 async function musicSearch(query) {
+  if (muProvider === 'soulseek') return slskSearch(query);
   const seq = ++dlSearchSeq;
   muAlbum = null;
   showMusicView(null);
@@ -1285,6 +1297,8 @@ async function musicOpen(url, hint = null, fromResults = false) {
     const res = await window.api.musicInfo(url);
     if (seq !== dlSearchSeq) return;
     dlState(null);
+    // A DRM service's link (Spotify, Apple Music…): this is the same music from YouTube Music.
+    if (res.via && res.hint && !hint) hint = res.hint;
     if (res.kind === 'album') {
       // Fill gaps in the album details with what the search row showed.
       const a = res.album;
@@ -1298,6 +1312,8 @@ async function musicOpen(url, hint = null, fromResults = false) {
         if (hint.artistLinks && hint.artistLinks.length) a.artistLinks = hint.artistLinks;
       }
       renderAlbum(a);
+      muAlbum.byTrack = !!a.byTrack;
+      if (res.via) drmNote(res.via);
       const first = (a.entries || []).find((t) => t.url);
       checkBetter(seq, { url, kind: 'album', title: a.title, artist: a.artist, count: a.count, firstUrl: first && first.url });
     }
@@ -1308,6 +1324,7 @@ async function musicOpen(url, hint = null, fromResults = false) {
       // Prefer the search row's square cover art over a 16:9 video frame.
       if (hint && hint.thumbnail) res.info.thumbnail = hint.thumbnail;
       renderCard(res.info);
+      if (res.via) drmNote(res.via);
       checkBetter(seq, { url, kind: 'track', title: res.info.track || res.info.title, artist: res.info.artist || res.info.uploader });
     }
   } catch (e) {
@@ -1399,6 +1416,21 @@ $('mu-back').onclick = () => {
 };
 
 // ---------- Artist pages ----------
+// Player mode → an artist's YouTube Music page: the Music Downloader finds the artist by name.
+window.nabbitOpenArtist = async (name) => {
+  document.querySelector('.tab[data-mode="music"]').click();
+  showMusicView(null);
+  dlState('loading', `Finding ${name} on YouTube Music…`);
+  try {
+    const list = await window.api.musicSearch(name, 'artists', 'ytmusic');
+    const a = (list || []).find((x) => x.type === 'artists' && x.url);
+    if (!a) throw new Error(`${name} wasn't found on YouTube Music.`);
+    dlState(null);
+    openArtist(a.url, a);
+  } catch (e) {
+    dlState('error', String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
+  }
+};
 async function openArtist(url, hint = null) {
   const seq = ++dlSearchSeq;
   showMusicView(null);
@@ -1497,7 +1529,7 @@ $('mu-lrclib').onclick = () => window.api.openExternal('https://lrclib.net');
 
 // ----- Album view -----
 const ALBUM_FORMATS = [
-  { group: 'Best', items: [{ value: 'best:flac', label: 'Highest quality possible (FLAC)' }] },
+  { group: 'Best', items: Formats.BEST_ITEMS },
   { group: 'Remux (lossless)', items: [{ value: 'remux:aac', label: 'AAC (remux)' }, { value: 'remux:ogg', label: 'OGG (remux)' }] },
   { group: 'Convert (re-encode)', items: ['aac', 'mp3', 'ogg', 'flac', 'wav'].map((x) => ({ value: `convert:${x}`, label: `${x.toUpperCase()} (convert)` })) },
   { group: 'Original', items: [{ value: 'orig:best', label: 'Best · Original file if offered' }, { value: 'orig:m4a', label: 'Best · M4A (AAC)' }, { value: 'orig:opus', label: 'Best · WEBM (Opus)' }] },
@@ -1574,10 +1606,10 @@ function albumQuality() {
     const keep = Formats.ratesFor(ext).includes(Number($('mu-asr').value)) ? $('mu-asr').value : 'auto';
     fillSelect($('mu-asr'), [{ value: 'auto', label: 'Auto (source)' }, ...Formats.ratesFor(ext).map((x) => ({ value: String(x), label: khz(x) }))], keep);
   } else {
-    disableSelects(['mu-asr'], 'Source rate');
+    disableSelects(['mu-asr'], kind === 'best' ? 'Up to 48 kHz' : 'Source rate');
   }
   if (kind === 'best') {
-    disableSelects(['mu-aqual'], '16-bit FLAC');
+    disableSelects(['mu-aqual'], ext === 'mp3' ? '320 kbps' : '16-bit');
   } else if (kind === 'convert' && Formats.LOSSLESS.includes(ext)) {
     fillSelect(sel, Formats.SAMPLE_BITS.map((b) => ({ value: `bits:${b}`, label: `${b}-bit` })), sel.value.startsWith('bits:') ? undefined : 'bits:16');
   } else if (kind === 'convert') {
@@ -1625,7 +1657,7 @@ function albumSourceLine() {
   const src = albumSource(choice);
   showSource($('mu-src'), src, out);
   const line = $('mu-src');
-  if (!line.classList.contains('warn')) line.textContent += ` → ${kind === 'best' ? bestText(src) : ''}`.replace(/ → $/, '') + ' (first track)';
+  if (!line.classList.contains('warn')) line.textContent += ` → ${kind === 'best' ? bestText(src, ext) : ''}`.replace(/ → $/, '') + ' (first track)';
 }
 
 function updateAlbumSelection() {
@@ -1658,6 +1690,8 @@ async function downloadAlbum() {
   start('album', {
     url: muAlbum.webpageUrl || $('dl-url').value.trim(),
     items,
+    // Rebuilt from YouTube Music songs (a DRM service's playlist): each ticked song's own link.
+    urls: muAlbum.byTrack ? muAlbum.entries.filter((t) => items.includes(t.index) && t.url).map((t) => t.url) : undefined,
     total: muAlbum.count,
     format: $('mu-afmt').value,
     audioKbps: q.startsWith('kbps:') ? Number(q.slice(5)) : null,
@@ -1728,7 +1762,46 @@ window.api.onNav(({ tool, mode, file }) => {
 // main.js keeps the settings (settings.json); the tray menu can change some, so the page follows
 // 'settings-changed' as well as its own changes.
 let settings = null;
+// ---------- Accent colour (Settings → Appearance): the red used for highlights, meters and the like ----------
+const ACCENT_DEFAULT = '#ff2a1f';
+const ACCENTS = [['#ff2a1f', 'Red'], ['#ff7a1a', 'Orange'], ['#ffc21a', 'Amber'], ['#2ee66b', 'Green'], ['#1ad9c4', 'Teal'], ['#3d8bff', 'Blue'], ['#9b5cff', 'Violet'], ['#ff3fa4', 'Pink']];
+function applyAccent(hex) {
+  const v = /^#[0-9a-f]{6}$/i.test(hex || '') ? hex.toLowerCase() : ACCENT_DEFAULT;
+  const root = document.documentElement.style;
+  if (v === ACCENT_DEFAULT) { root.removeProperty('--red'); root.removeProperty('--on-red'); }
+  else {
+    root.setProperty('--red', v);
+    // Text on the accent: dark on light colours (amber, green …), white on dark ones.
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(v.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    root.setProperty('--on-red', 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4 ? '#0c0c0c' : '#fff');
+  }
+  try { localStorage.setItem('nabbit.accent', v); } catch { /* none */ }
+  const pick = $('st-accent');
+  if (pick && document.activeElement !== pick) pick.value = v;
+  for (const s of document.querySelectorAll('#st-swatches .st-sw')) { const on = s.dataset.c === v; s.classList.toggle('on', on); s.setAttribute('aria-checked', String(on)); }
+}
+try { applyAccent(localStorage.getItem('nabbit.accent')); } catch { /* default */ }
+{
+  const box = $('st-swatches');
+  for (const [c, name] of ACCENTS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'st-sw';
+    b.dataset.c = c;
+    b.title = name;
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-label', name);
+    b.style.setProperty('--sw', c);
+    b.addEventListener('click', () => { applyAccent(c); saveSetting({ accent: c === ACCENT_DEFAULT ? '' : c }); });
+    box.append(b);
+  }
+  $('st-accent').addEventListener('input', (e) => applyAccent(e.target.value)); // live while picking
+  $('st-accent').addEventListener('change', (e) => saveSetting({ accent: e.target.value.toLowerCase() === ACCENT_DEFAULT ? '' : e.target.value }));
+  $('st-accent-reset').addEventListener('click', () => { applyAccent(ACCENT_DEFAULT); saveSetting({ accent: '' }); });
+}
+
 function showSettings(st) {
+  applyAccent(st.accent);
   settings = st;
   document.body.classList.toggle('not-windows', !st.isWindows);
   $('st-login').checked = st.startWithWindows;
@@ -1746,6 +1819,7 @@ function showSettings(st) {
   $('st-dir').value = st.downloadDir;
   $('st-hw').value = st.hwAccel;
   $('st-sq').value = st.streamQuality || 'normal';
+  $('st-pd').checked = st.playDownload !== false;
   $('st-scache').value = String(st.streamCacheMB ?? 1024);
   $('cv-hw').value = st.hwAccel;
   document.querySelectorAll('#st-theme .seg').forEach((b) => {
@@ -1790,6 +1864,7 @@ $('st-ytm').onchange = (e) => { saveSetting({ ytmCompare: e.target.checked }, e.
 $('st-shell').onchange = (e) => saveSetting({ shellMenu: e.target.checked }, e.target);
 $('st-hw').onchange = (e) => saveSetting({ hwAccel: e.target.value });
 $('st-sq').onchange = (e) => saveSetting({ streamQuality: e.target.value });
+$('st-pd').onchange = (e) => saveSetting({ playDownload: e.target.checked });
 $('st-scache').onchange = async (e) => { await saveSetting({ streamCacheMB: Number(e.target.value) }); cacheInfo(); };
 async function cacheInfo() {
   const i = await window.api.streamCacheInfo();
@@ -1834,3 +1909,588 @@ document.querySelectorAll('#theme-switch button').forEach((b) => b.addEventListe
 }));
 window.api.windowTitle().then((t) => { $('win-title').textContent = t; });
 
+
+
+// ---------- Soulseek (Music Downloader source) ----------
+// main.js runs the search (with fallback queries while too little matches), filters, ranks and groups the
+// answers, and sends the view here a few times a second: albums (folders) or songs, each shared by one or
+// more users, best first. Downloads try the next user who has it when one fails.
+let slskId = null;           // the search session shown
+let slskItems = [];
+let slskMeta = {};
+let slskOpen = new Set();    // expanded entries (by key)
+let slskPick = new Map();    // key → the source chosen in an expanded album
+let slskPrefsNow = null;
+const LOSSLESS_EXT = ['flac', 'wav', 'aiff', 'aif', 'alac', 'ape', 'wv', 'dsf', 'dff'];
+const SLSK_LOSSY = ['mp3', 'm4a', 'aac', 'ogg', 'opus', 'wma'];
+const mbText = (b) => (b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : b >= 1e6 ? `${(b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`);
+// "FLAC 24-bit/96 kHz" · "MP3 320 kbps VBR"
+function slskQuality(x) {
+  const ext = (x.formats ? x.formats.join('/') : x.ext || '').toUpperCase();
+  if (x.bitDepth || x.sampleRate) return `${ext} ${x.bitDepth ? `${x.bitDepth}-bit` : ''}${x.bitDepth && x.sampleRate ? '/' : ''}${x.sampleRate ? `${+(x.sampleRate / 1000).toFixed(1)} kHz` : ''}`.trim();
+  if (x.bitrate) return `${ext} ${x.bitrate} kbps${x.vbr ? ' VBR' : ''}`;
+  return ext;
+}
+const slskAvail = (src) => (src.slotFree ? 'Free slot' : `Queue ${src.queue}`);
+const slskMode = () => (muType === 'songs' ? 'songs' : 'albums');
+
+async function slskSearch(query, target) {
+  const seq = ++dlSearchSeq;
+  slskBatchShow(false); // a single search shows its results
+  muAlbum = null;
+  muResults = null;
+  showMusicView(null);
+  if (slskId) window.api.slskStop(slskId);
+  slskId = null;
+  slskItems = [];
+  slskOpen = new Set();
+  slskPick = new Map();
+  const st = await window.api.slskStatus().catch(() => ({}));
+  if (!st.configured) {
+    dlState('note', 'Sign in to Soulseek first: Settings → Soulseek.');
+    const go = Object.assign(document.createElement('button'), { type: 'button', className: 'link-btn', textContent: ' Open Settings' });
+    go.onclick = () => document.querySelector('.tab[data-tool="settings"]').click();
+    $('dl-state').append(go);
+    return;
+  }
+  dlState('loading', st.online ? 'Searching Soulseek…' : 'Signing in to Soulseek…');
+  $('dl-search').disabled = true;
+  try {
+    if (!slskPrefsNow) slskPrefsNow = await window.api.slskPrefsGet().catch(() => null);
+    const r = await window.api.slskSearch(target ? { target, mode: slskMode() } : { query, mode: slskMode() });
+    if (seq !== dlSearchSeq) { window.api.slskStop(r.id); return; }
+    slskId = r.id;
+    slskMeta = { queries: r.queries, target: r.target, status: 'Searching…', done: false };
+    slskYtmLookup(r.target, seq);
+    renderSlsk();
+  } catch (e) {
+    if (seq === dlSearchSeq) dlState('error', cleanMsg(e));
+  } finally {
+    if (seq === dlSearchSeq) $('dl-search').disabled = false;
+  }
+}
+window.api.onSlskView((v) => {
+  if (v.id !== slskId) return;
+  slskItems = v.items;
+  slskMeta = { ...slskMeta, ...v };
+  renderSlsk();
+});
+window.api.onSlskStatus((st) => { if (!st.online && muProvider === 'soulseek' && dlMode === 'music') dlState('note', st.message); });
+
+function renderSlsk() {
+  if (muProvider !== 'soulseek') return;
+  const box = $('mu-results');
+  const keepScroll = box.scrollTop;
+  box.innerHTML = '';
+  box.classList.add('slsk-list');
+  const m = slskMeta;
+  const noun = slskMode() === 'albums' ? 'album' : 'song';
+  // Status: what's being searched, then how much came back.
+  if (!m.done) dlState('loading', m.status || 'Searching Soulseek…');
+  else dlState(slskItems.length || !m.status ? null : 'note', slskItems.length ? null : m.status);
+  const head = Object.assign(document.createElement('div'), { className: 'slsk-head' });
+  const count = Object.assign(document.createElement('span'), { className: 'slsk-count' });
+  count.textContent = m.total ? `${m.total} ${noun}${m.total === 1 ? '' : 's'} from ${m.users} user${m.users === 1 ? '' : 's'}${m.done ? '' : ' so far'} · best first` : '';
+  if (m.queries && m.queries.length > 1) count.title = `Searches: ${m.queries.join(' · ')}`;
+  head.append(count, slskToggles(), slskLayoutSwitch());
+  box.append(head);
+  for (const g of slskItems) box.append(slskLayout === 'simple' ? slskSimple(g) : slskEntry(g));
+  box.scrollTop = keepScroll;
+  showMusicView('results');
+}
+// Quick filters above the results (saved; Settings → Soulseek has the rest).
+function slskToggles() {
+  const p = slskPrefsNow || {};
+  const wrap = Object.assign(document.createElement('span'), { className: 'slsk-toggles' });
+  const fm = Array.isArray(p.formats) && p.formats.length ? p.formats : null;
+  const kind = fm && fm.every((f) => LOSSLESS_EXT.includes(f)) ? 'lossless' : fm && fm.every((f) => !LOSSLESS_EXT.includes(f)) ? 'lossy' : 'all';
+  // Lossy only · All · Lossless only
+  const sw = Object.assign(document.createElement('span'), { className: 'mu-provider slsk-layout slsk-kind', role: 'radiogroup' });
+  sw.setAttribute('aria-label', 'Formats');
+  for (const [v, label, tip, formats] of [
+    ['lossy', 'Lossy only', 'Only MP3, AAC, Opus, Ogg… (smaller files)', SLSK_LOSSY],
+    ['all', 'All', 'Every format', []],
+    ['lossless', 'Lossless only', 'Only FLAC, WAV, ALAC, APE…', LOSSLESS_EXT],
+  ]) {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'seg' + (kind === v ? ' active' : ''), textContent: label, title: tip });
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(kind === v));
+    b.onclick = async () => { if (kind === v) return; slskPrefsNow = await window.api.slskPrefs({ formats }); renderSlsk(); };
+    sw.append(b);
+  }
+  wrap.append(sw);
+  const chip = (label, on, title, fn) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'chip' + (on ? ' active' : ''), textContent: label, title });
+    b.setAttribute('aria-pressed', String(!!on));
+    b.onclick = async () => { slskPrefsNow = await window.api.slskPrefs(fn(!on)); renderSlsk(); };
+    return b;
+  };
+  wrap.append(
+    chip('Exact match', p.strictTitle && p.strictArtist, 'Only files whose path has the artist and the title or album', (v) => ({ strictTitle: v, strictArtist: v })),
+  );
+  return wrap;
+}
+function slskEntry(g) {
+  const isAlbum = slskMode() === 'albums';
+  const best = g.sources[0];
+  const wrap = Object.assign(document.createElement('div'), { className: 'slsk-item' });
+  const row = Object.assign(document.createElement('div'), { className: 'result slsk-row' + (g.matches ? '' : ' weak'), tabIndex: 0 });
+  row.setAttribute('role', 'button');
+  const open = slskOpen.has(g.key);
+  row.setAttribute('aria-expanded', String(open));
+  const lossless = isAlbum ? best.lossless : LOSSLESS_EXT.includes(best.ext);
+  row.append(Object.assign(document.createElement('span'), { className: 'slsk-badge' + (lossless ? ' lossless' : ''), textContent: ((isAlbum ? best.formats[0] : best.ext) || '?').toUpperCase() }));
+  const text = Object.assign(document.createElement('span'), { className: 'r-text' });
+  text.append(Object.assign(document.createElement('div'), { className: 'r-title', textContent: g.name, title: isAlbum ? best.folder : best.file }));
+  const sub = Object.assign(document.createElement('div'), { className: 'r-sub' });
+  sub.textContent = [isAlbum ? `${g.tracks} track${g.tracks === 1 ? '' : 's'}` : g.duration ? clock(g.duration) : null, g.quality,
+    g.users > 1 ? `shared by ${g.users} users` : best.user].filter(Boolean).join(' · ');
+  text.append(sub);
+  row.append(text);
+  row.append(Object.assign(document.createElement('span'), { className: 'slsk-avail' + (best.slotFree ? ' free' : ''), textContent: slskAvail(best), title: `${best.user} · about ${mbText(best.speed || 0)}/s` }));
+  const dl = Object.assign(document.createElement('button'), { type: 'button', className: 'ghost slsk-dl', textContent: isAlbum ? 'Download album' : 'Download' });
+  dl.title = g.users > 1 ? 'From the best source; if it fails, from the next' : `From ${best.user}`;
+  dl.onclick = (e) => { e.stopPropagation(); slskDownload(g); };
+  const y = isAlbum ? slskYtmFor(g) : null;
+  if (!isAlbum || y) {
+    const play = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-btn slsk-play', textContent: '▶', title: 'Play from YouTube Music' });
+    play.setAttribute('aria-label', 'Play from YouTube Music');
+    play.onclick = (e) => { e.stopPropagation(); if (isAlbum) slskPlayAlbum(y, 0); else slskPlaySong(g, play); };
+    row.append(play);
+  }
+  row.append(dl);
+  const toggle = () => { if (slskOpen.has(g.key)) slskOpen.delete(g.key); else slskOpen.add(g.key); wrap.replaceWith(slskEntry(g)); };
+  row.addEventListener('click', toggle);
+  row.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === row) { e.preventDefault(); toggle(); } });
+  wrap.append(row);
+  if (open) wrap.append(slskDetail(g));
+  return wrap;
+}
+// Expanded: the sources (users) that have it, and for albums the chosen source's tracks.
+function slskDetail(g) {
+  const isAlbum = slskMode() === 'albums';
+  const box = Object.assign(document.createElement('div'), { className: 'slsk-detail' });
+  const chosen = slskPick.get(g.key) || 0;
+  const srcList = Object.assign(document.createElement('ol'), { className: 'slsk-sources' });
+  g.sources.forEach((src, i) => {
+    const li = document.createElement('li');
+    if (isAlbum && i === chosen) li.classList.add('on');
+    const pick = Object.assign(document.createElement('button'), { type: 'button', className: 'src-pick', title: isAlbum ? 'Show this copy\'s tracks' : src.file });
+    pick.append(Object.assign(document.createElement('span'), { className: 's-user', textContent: src.user }),
+      Object.assign(document.createElement('span'), { className: 's-q' + ((isAlbum ? src.lossless : LOSSLESS_EXT.includes(src.ext)) ? ' lossless' : ''), textContent: slskQuality(src) }),
+      Object.assign(document.createElement('span'), { className: 's-size', textContent: mbText(src.size) }),
+      Object.assign(document.createElement('span'), { className: 's-av' + (src.slotFree ? ' free' : ''), textContent: slskAvail(src) + (src.failed ? ' · failed before' : '') }));
+    if (isAlbum) pick.onclick = () => { slskPick.set(g.key, i); box.replaceWith(slskDetail(g)); };
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-btn f-dl', textContent: '↓', title: `Download from ${src.user} (then the others if it fails)` });
+    b.setAttribute('aria-label', `Download from ${src.user}`);
+    b.onclick = () => slskDownload(g, src);
+    li.append(pick, b);
+    srcList.append(li);
+  });
+  box.append(Object.assign(document.createElement('div'), { className: 'slsk-sub-head', textContent: isAlbum ? 'Copies' : 'Sources' }), srcList);
+  if (isAlbum) {
+    const src = g.sources[chosen];
+    const list = Object.assign(document.createElement('ol'), { className: 'slsk-files' });
+    box.append(Object.assign(document.createElement('div'), { className: 'slsk-sub-head', textContent: `Tracks · ${src.user} · ${src.folder.split(/[\\/]/).slice(-2).join(' / ')}` }), list);
+    const fill = (files) => {
+      for (const f of files) {
+        const li = document.createElement('li');
+        li.append(Object.assign(document.createElement('span'), { className: 'f-name', textContent: f.name, title: f.file }));
+        li.append(Object.assign(document.createElement('span'), { className: 'f-q' + (LOSSLESS_EXT.includes(f.ext) ? ' lossless' : ''), textContent: slskQuality(f) }));
+        if (f.duration) li.append(Object.assign(document.createElement('span'), { className: 'f-dur', textContent: clock(f.duration) }));
+        li.append(Object.assign(document.createElement('span'), { className: 'f-size', textContent: mbText(f.size) }));
+        const b = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-btn f-dl', textContent: '↓', title: `Download ${f.name}` });
+        b.setAttribute('aria-label', `Download ${f.name}`);
+        b.onclick = () => slskDownload(g, src, [f]);
+        li.append(b);
+        list.append(li);
+      }
+    };
+    if (src.files) fill(src.files);
+    else window.api.slskSource(slskId, g.key, src.user, src.folder).then((files) => { src.files = files; fill(files); });
+  }
+  return box;
+}
+async function slskDownload(g, src, files) {
+  const isAlbum = slskMode() === 'albums';
+  const y = isAlbum ? slskYtmFor(g) : null;
+  const title = files && files.length === 1 ? `Soulseek · ${files[0].name}` : `Soulseek · ${y ? y.title : g.name}`;
+  // Tag with YouTube Music's album: cover, title, artist, year and its track titles.
+  let meta;
+  if (y) {
+    const full = await slskYtmAlbum(y).catch(() => null);
+    meta = { album: y.title, artist: y.artist || '', year: y.year || '', cover: y.thumbnail || '', tracks: ((full && full.entries) || []).map((e) => e.title) };
+  }
+  start('slsk', { session: slskId, key: g.key, user: src ? src.user : undefined, folder: src && isAlbum ? src.folder : undefined, files: files ? files.map((f) => f.file) : undefined, meta }, title);
+}
+// Leaving Soulseek for another source: drop its results. On Soulseek only Songs / Albums apply.
+document.querySelectorAll('#mu-provider .seg').forEach((b) => b.addEventListener('click', () => {
+  if (b.dataset.provider !== 'soulseek') { $('mu-results').classList.remove('slsk-list'); if (slskId) window.api.slskStop(slskId); slskId = null; }
+  slskChips();
+}));
+function slskChips() {
+  const on = muProvider === 'soulseek';
+  document.querySelectorAll('#mu-types .chip[data-type]').forEach((c) => c.classList.toggle('hidden', on && !['songs', 'albums'].includes(c.dataset.type)));
+  $('slsk-batch-btn').classList.toggle('hidden', !on);
+  if (!on && typeof slskBatchShow === 'function') slskBatchShow(false);
+  if (on && !['songs', 'albums'].includes(muType)) document.querySelector('#mu-types .chip[data-type="albums"]').click();
+}
+slskChips();
+
+// "Find on Soulseek" on an opened YouTube Music / SoundCloud song or album: searches with its details
+// (artist, title or album, length, track count), so the results can be matched exactly.
+function slskFindButton(where, getTarget, mode) {
+  let b = where.querySelector('.slsk-find');
+  if (!b) {
+    b = Object.assign(document.createElement('button'), { type: 'button', className: 'ghost slsk-find', textContent: 'Find on Soulseek' });
+    b.title = 'Search Soulseek for this, matched by artist, title and length';
+    where.append(b);
+  }
+  b.onclick = () => {
+    const t = getTarget();
+    if (!t) return;
+    // The YouTube Music album on screen gives the results (and the downloads) their cover and tags.
+    slskYtmSeed = mode === 'albums' && muAlbum ? { title: muAlbum.title, artist: muAlbum.artist, year: muAlbum.year, thumbnail: muAlbum.thumbnail,
+      url: muAlbum.webpageUrl, entries: (muAlbum.entries || []).map((e) => ({ index: e.index, title: e.title, duration: e.duration, url: e.url, artist: e.artist })) } : null;
+    muType = mode;
+    document.querySelectorAll('#mu-types .chip[data-type]').forEach((c) => { c.classList.toggle('active', c.dataset.type === mode); c.setAttribute('aria-checked', String(c.dataset.type === mode)); });
+    setProvider('soulseek');
+    slskChips();
+    $('dl-url').value = [t.artist, t.album || t.title].filter(Boolean).join(' - ');
+    slskSearch(null, t);
+  };
+  return b;
+}
+// Settings → Soulseek
+async function slskSettings(st) {
+  $('st-slsk-user').value = st.slskUser || '';
+  $('st-slsk-port').value = st.slskPort || 2234;
+  $('st-slsk-pass').placeholder = st.slskHasPassword ? 'Saved (type to change)' : '';
+  $('st-slsk-state').textContent = st.slskOnline ? `Signed in as ${st.slskUser}.` : st.slskUser ? 'Not signed in. Signs in when you search.' : 'Not signed in.';
+}
+$('st-slsk-go').addEventListener('click', async () => {
+  const btn = $('st-slsk-go');
+  btn.disabled = true;
+  $('st-slsk-state').textContent = 'Signing in…';
+  try {
+    const r = await window.api.slskAccount({ username: $('st-slsk-user').value, password: $('st-slsk-pass').value, port: $('st-slsk-port').value });
+    $('st-slsk-pass').value = '';
+    $('st-slsk-pass').placeholder = 'Saved (type to change)';
+    $('st-slsk-state').textContent = r.online ? `Signed in as ${$('st-slsk-user').value.trim()} · listening on port ${r.port}.` : 'Saved. Enter a username and password to sign in.';
+  } catch (e) {
+    $('st-slsk-state').textContent = cleanMsg(e);
+  } finally { btn.disabled = false; }
+});
+window.api.settingsGet().then(slskSettings).catch(() => {});
+
+// The "Find on Soulseek" buttons follow what's open in the Music Downloader.
+{
+  const base = showMusicView;
+  showMusicView = function (view) {
+    base(view);
+    const albumMeta = document.querySelector('#mu-album .album-meta');
+    const songMeta = document.querySelector('#dl-card .video-meta');
+    const off = muProvider === 'soulseek' || dlMode !== 'music';
+    if (albumMeta) {
+      const b = slskFindButton(albumMeta, () => muAlbum && { artist: muAlbum.artist || '', album: muAlbum.title || '', title: muAlbum.title || '', tracks: (muAlbum.entries || []).length || null }, 'albums');
+      b.classList.toggle('hidden', off || view !== 'album');
+    }
+    if (songMeta) {
+      const b = slskFindButton(songMeta, () => dlInfo && { artist: dlInfo.artist || dlInfo.uploader || '', title: dlInfo.track || dlInfo.title || '', length: dlInfo.duration || null }, 'songs');
+      b.classList.toggle('hidden', off || view !== 'card');
+    }
+  };
+}
+
+// Settings → Soulseek → Search
+(async () => {
+  const p = await window.api.slskPrefsGet().catch(() => null);
+  if (!p) return;
+  slskPrefsNow = p;
+  $('st-slsk-pref').value = p.prefFormat;
+  $('st-slsk-minbr').value = String(p.minBitrate || 0);
+  $('st-slsk-fb').value = String(p.fallbackLevel);
+  $('st-slsk-hires').checked = !!p.hiRes;
+  $('st-slsk-strict').checked = !!(p.strictTitle && p.strictArtist);
+  $('st-slsk-ban').value = (p.bannedUsers || []).join('\n');
+  const save = async (patch) => { slskPrefsNow = await window.api.slskPrefs(patch); };
+  $('st-slsk-pref').onchange = (e) => save({ prefFormat: e.target.value });
+  $('st-slsk-minbr').onchange = (e) => save({ minBitrate: Number(e.target.value) });
+  $('st-slsk-fb').onchange = (e) => save({ fallbackLevel: Number(e.target.value) });
+  $('st-slsk-hires').onchange = (e) => save({ hiRes: e.target.checked });
+  $('st-slsk-strict').onchange = (e) => save({ strictTitle: e.target.checked, strictArtist: e.target.checked });
+  $('st-slsk-ban').onchange = (e) => save({ bannedUsers: e.target.value.split(/\r?\n/) });
+})();
+
+// ---------- Soulseek: other inputs (links, field lists, files) and batches ----------
+// In the search box: words search as before; "title=…, artist=…" searches those fields; a playlist /
+// album / track link (YouTube, Spotify, SoundCloud, Bandcamp, MusicBrainz), a slsk:// link or a file
+// path is read first: one song or album searches straight away, more open in Batch to check and start.
+const isFieldList = (s) => /^(?:title|artist|album|length)\s*=/i.test(s);
+async function slskInput(text) {
+  const plain = !/^https?:\/\//i.test(text) && !/^slsk:\/\//i.test(text) && !/\.(csv|txt|list)$/i.test(text) && !isFieldList(text);
+  if (plain) return slskSearch(text);
+  const seq = ++dlSearchSeq;
+  dlState('loading', 'Reading that…');
+  const r = await window.api.slskResolve(text, slskMode()).catch((e) => ({ items: [], errors: [{ input: text, message: cleanMsg(e) }] }));
+  if (seq !== dlSearchSeq) return;
+  if (r.items.length === 1 && r.items[0].mode !== 'link') {
+    const it = r.items[0];
+    muType = it.mode;
+    document.querySelectorAll('#mu-types .chip[data-type]').forEach((c) => { c.classList.toggle('active', c.dataset.type === it.mode); c.setAttribute('aria-checked', String(c.dataset.type === it.mode)); });
+    return slskSearch(null, it.target);
+  }
+  dlState(null);
+  slskBatchShow(true);
+  $('sb-text').value = text;
+  slskBatchPreview(r);
+}
+
+let sbItems = [];
+function slskBatchShow(on) {
+  $('slsk-batch').classList.toggle('hidden', !on);
+  $('slsk-batch-btn').classList.toggle('active', on);
+  $('slsk-batch-btn').setAttribute('aria-pressed', String(on));
+  $('sb-mode').textContent = slskMode();
+  if (on) setTimeout(() => $('sb-text').focus(), 0);
+}
+$('slsk-batch-btn').onclick = () => slskBatchShow($('slsk-batch').classList.contains('hidden'));
+$('sb-close').onclick = () => slskBatchShow(false);
+document.querySelectorAll('#mu-types .chip[data-type]').forEach((c) => c.addEventListener('click', () => { $('sb-mode').textContent = slskMode(); }));
+const sbReset = () => { sbItems = []; $('sb-go-row').classList.add('hidden'); };
+const sbAppend = (lines) => {
+  const cur = $('sb-text').value.replace(/\s+$/, '');
+  $('sb-text').value = (cur ? `${cur}\n` : '') + lines.join('\n');
+  sbReset();
+};
+$('sb-file').onclick = async () => {
+  const files = await window.api.pickFiles([{ name: 'Lists (CSV, TXT)', extensions: ['csv', 'txt', 'list'] }]);
+  if (files && files.length) sbAppend(files);
+};
+$('sb-text').addEventListener('dragover', (e) => e.preventDefault());
+$('sb-text').addEventListener('drop', (e) => {
+  const paths = [...(e.dataTransfer.files || [])].map((f) => window.api.pathForFile(f)).filter(Boolean);
+  if (!paths.length) return; // dropped text: the box takes it
+  e.preventDefault();
+  sbAppend(paths);
+});
+$('sb-text').addEventListener('input', sbReset);
+let sbReading = false;
+window.api.onSlskResolveProgress(({ i, n, line }) => {
+  if (sbReading) $('sb-note').textContent = `Reading ${i + 1} of ${n}: ${line.slice(0, 80)}`;
+});
+$('sb-preview').onclick = async () => {
+  const text = $('sb-text').value.trim();
+  if (!text) return $('sb-text').focus();
+  $('sb-preview').disabled = true;
+  const note = $('sb-note').innerHTML;
+  sbReading = true;
+  try {
+    slskBatchPreview(await window.api.slskResolve(text, slskMode()));
+  } catch (e) {
+    slskBatchPreview({ items: [], errors: [{ input: text.split('\n')[0], message: cleanMsg(e) }] });
+  } finally {
+    sbReading = false;
+    $('sb-preview').disabled = false;
+    $('sb-note').innerHTML = note;
+    $('sb-mode').textContent = slskMode();
+  }
+};
+function slskBatchPreview(r) {
+  sbItems = r.items || [];
+  const box = $('sb-list');
+  box.innerHTML = '';
+  const kind = { albums: 'Album', songs: 'Song', link: 'Link' };
+  const list = document.createElement('ol');
+  for (const it of sbItems.slice(0, 500)) {
+    const li = document.createElement('li');
+    li.append(Object.assign(document.createElement('span'), { className: 'sb-kind', textContent: kind[it.mode] }));
+    li.append(Object.assign(document.createElement('span'), { className: 'sb-label', textContent: it.label, title: it.label }));
+    const t = it.target || {};
+    const extra = [t.length ? clock(t.length) : null, t.tracks ? `${t.tracks} tracks` : null, it.prefs && Object.keys(it.prefs).length ? 'conditions' : null].filter(Boolean).join(' · ');
+    if (extra) li.append(Object.assign(document.createElement('span'), { className: 'sb-extra', textContent: extra }));
+    list.append(li);
+  }
+  box.append(list);
+  if (sbItems.length > 500) box.append(Object.assign(document.createElement('p'), { className: 'hint small', textContent: `…and ${sbItems.length - 500} more.` }));
+  for (const e of r.errors || []) box.append(Object.assign(document.createElement('p'), { className: 'sb-err', textContent: `✕ ${e.input.slice(0, 120)}: ${e.message}` }));
+  box.classList.toggle('hidden', !sbItems.length && !(r.errors || []).length);
+  $('sb-count').textContent = sbItems.length ? `${sbItems.length} to find · roughly ${Math.max(1, Math.round((sbItems.length * 10) / 60))} min of searching (Soulseek limits searches)` : 'Nothing to find.';
+  $('sb-go').textContent = `Find & download all (${sbItems.length})`;
+  $('sb-go').disabled = !sbItems.length;
+  $('sb-go-row').classList.remove('hidden');
+}
+$('sb-go').onclick = () => {
+  if (!sbItems.length) return;
+  start('slsk-batch', { items: sbItems }, `Soulseek batch · ${sbItems.length} item${sbItems.length === 1 ? '' : 's'}`);
+  $('sb-go').disabled = true;
+  $('sb-count').textContent = 'Started: follow it in Jobs.';
+};
+
+// ---------- Soulseek: YouTube Music covers + metadata, and the simple layout ----------
+// Soulseek folders have no cover and messy names; the matching YouTube Music album supplies both (shown
+// in the results and written into the downloaded files' tags).
+let slskYtmSeed = null;           // the album "Find on Soulseek" came from
+let slskYtm = [];                 // YouTube Music albums for the current search
+const slskYtmFull = new Map();    // album url → { entries } (track titles)
+let slskLayout = (() => { try { return localStorage.getItem('nabbit-slsk-layout') || 'simple'; } catch { return 'simple'; } })();
+const nrm = (s) => String(s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+// A folder's album name without "Artist - ", year and format tags: "10 Years - The Autumn Effect (2005) [FLAC]" → "the autumn effect"
+const folderAlbum = (name, artist) => {
+  let n = String(name).replace(/[([{][^)\]}]*[)\]}]/g, ' ').replace(/\b(?:flac|mp3|320|v0|web|cd|vinyl|lossless|24-?bit|16-?bit|\d{2,3}(?:\.\d)?\s?khz)\b/gi, ' ');
+  n = nrm(n.replace(/^\s*\d{4}\s*[-.]\s*/, ''));
+  const a = nrm(artist);
+  if (a && n.startsWith(`${a} `)) n = n.slice(a.length + 1);
+  return n.replace(/^\d{4} /, '').trim();
+};
+async function slskYtmLookup(target, seq) {
+  slskYtm = slskYtmSeed ? [slskYtmSeed] : [];
+  if (slskYtmSeed && slskYtmSeed.url) slskYtmFull.set(slskYtmSeed.url, { entries: slskYtmSeed.entries });
+  slskYtmSeed = null;
+  if (slskMode() !== 'albums' || slskYtm.length) return;
+  const q = [target.artist, target.album || target.title].filter(Boolean).join(' ');
+  if (!q) return;
+  try {
+    const res = await window.api.musicSearch(q, 'albums', 'ytmusic');
+    if (seq !== dlSearchSeq) return;
+    slskYtm = (res || []).filter((r) => r.url && r.title).slice(0, 10);
+    renderSlsk();
+  } catch {}
+}
+function slskYtmFor(g) {
+  if (!slskYtm.length) return null;
+  const a = folderAlbum(g.name, slskYtm[0].artist);
+  if (!a) return null;
+  return slskYtm.find((y) => nrm(y.title) === a) || slskYtm.find((y) => { const t = nrm(y.title); return t.length > 3 && (a.includes(t) || t.includes(a)); }) || null;
+}
+async function slskYtmAlbum(y) {
+  if (slskYtmFull.has(y.url)) return slskYtmFull.get(y.url);
+  const r = await window.api.musicInfo(y.url);
+  const full = { entries: (r && r.album && r.album.entries) || [] };
+  slskYtmFull.set(y.url, full);
+  return full;
+}
+function slskLayoutSwitch() {
+  const wrap = Object.assign(document.createElement('span'), { className: 'mu-provider slsk-layout', role: 'radiogroup' });
+  wrap.setAttribute('aria-label', 'Layout');
+  for (const [v, label, tip] of [['simple', 'Simple', 'Covers and track names; Nabbit picks the copy'], ['advanced', 'Advanced', 'Every copy, user and file']]) {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'seg' + (slskLayout === v ? ' active' : ''), textContent: label, title: tip });
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(slskLayout === v));
+    b.onclick = () => { slskLayout = v; try { localStorage.setItem('nabbit-slsk-layout', v); } catch {} renderSlsk(); };
+    wrap.append(b);
+  }
+  return wrap;
+}
+// Simple: one row per album / song with its cover and plain details; open an album for its track list.
+function slskSimple(g) {
+  const isAlbum = slskMode() === 'albums';
+  const best = g.sources[0];
+  const y = isAlbum ? slskYtmFor(g) : null;
+  const wrap = Object.assign(document.createElement('div'), { className: 'slsk-item simple' });
+  const row = Object.assign(document.createElement('div'), { className: 'result slsk-row' + (g.matches ? '' : ' weak'), tabIndex: isAlbum ? 0 : -1 });
+  const open = isAlbum && slskOpen.has(g.key);
+  if (isAlbum) { row.setAttribute('role', 'button'); row.setAttribute('aria-expanded', String(open)); }
+  if (y && y.thumbnail) {
+    const img = Object.assign(document.createElement('img'), { className: 'slsk-cover', alt: '', loading: 'lazy', src: y.thumbnail });
+    img.onerror = () => img.replaceWith(Object.assign(document.createElement('span'), { className: 'slsk-badge', textContent: (best.formats || [best.ext])[0].toUpperCase() }));
+    row.append(img);
+  } else {
+    const lossless = isAlbum ? best.lossless : LOSSLESS_EXT.includes(best.ext);
+    row.append(Object.assign(document.createElement('span'), { className: 'slsk-badge' + (lossless ? ' lossless' : ''), textContent: ((isAlbum ? best.formats[0] : best.ext) || '?').toUpperCase() }));
+  }
+  const text = Object.assign(document.createElement('span'), { className: 'r-text' });
+  const artist = (y && y.artist) || (slskMeta.target && slskMeta.target.artist) || '';
+  text.append(Object.assign(document.createElement('div'), { className: 'r-title', textContent: y ? y.title : isAlbum ? g.name : slskTrackTitle(g.name), title: isAlbum ? best.folder : best.file }));
+  const sub = Object.assign(document.createElement('div'), { className: 'r-sub' });
+  sub.textContent = [artist, y && y.year, isAlbum ? `${g.tracks} track${g.tracks === 1 ? '' : 's'}` : g.duration ? clock(g.duration) : null].filter(Boolean).join(' · ');
+  const q = Object.assign(document.createElement('div'), { className: 'r-sub slsk-q' + ((isAlbum ? best.lossless : LOSSLESS_EXT.includes(best.ext)) ? ' lossless' : '') });
+  q.textContent = [slskQuality(best), mbText(best.size), g.users > 1 ? `${g.users} copies` : null].filter(Boolean).join(' · ');
+  text.append(sub, q);
+  row.append(text);
+  row.append(Object.assign(document.createElement('span'), { className: 'slsk-avail' + (best.slotFree ? ' free' : ''), textContent: best.slotFree ? 'Ready' : `Queue ${best.queue}` }));
+  // Listen first: the same album / song streamed from YouTube Music, when it's there.
+  if (!isAlbum || y) {
+    const play = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-btn slsk-play', textContent: '▶', title: 'Play from YouTube Music' });
+    play.setAttribute('aria-label', `Play ${y ? y.title : slskTrackTitle(g.name)} from YouTube Music`);
+    play.onclick = (e) => { e.stopPropagation(); if (isAlbum) slskPlayAlbum(y, 0); else slskPlaySong(g, play); };
+    row.append(play);
+  }
+  const dl = Object.assign(document.createElement('button'), { type: 'button', className: 'ghost slsk-dl', textContent: 'Download' });
+  dl.onclick = (e) => { e.stopPropagation(); slskDownload(g); };
+  row.append(dl);
+  wrap.append(row);
+  if (isAlbum) {
+    const toggle = () => { if (slskOpen.has(g.key)) slskOpen.delete(g.key); else slskOpen.add(g.key); wrap.replaceWith(slskSimple(g)); };
+    row.addEventListener('click', toggle);
+    row.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === row) { e.preventDefault(); toggle(); } });
+  }
+  if (open) {
+    const list = Object.assign(document.createElement('ol'), { className: 'slsk-files simple' });
+    wrap.append(list);
+    const fill = (titles) => {
+      const files = best.files || [];
+      files.forEach((f, i) => {
+        const li = document.createElement('li');
+        // With YouTube Music's titles (same track count) each track plays from there.
+        if (titles) {
+          const p = Object.assign(document.createElement('button'), { type: 'button', className: 'f-play', title: 'Play from YouTube Music' });
+          p.append(Object.assign(document.createElement('span'), { className: 'n', textContent: String(i + 1).padStart(2, '0') }), Object.assign(document.createElement('span'), { className: 'p', textContent: '▶' }));
+          p.setAttribute('aria-label', `Play ${titles[i]} from YouTube Music`);
+          p.onclick = () => slskPlayAlbum(y, i);
+          li.append(p);
+        } else li.append(Object.assign(document.createElement('span'), { className: 'f-no', textContent: String(i + 1).padStart(2, '0') }));
+        li.append(Object.assign(document.createElement('span'), { className: 'f-name', textContent: (titles && titles[i]) || slskTrackTitle(f.name) }));
+        if (f.duration) li.append(Object.assign(document.createElement('span'), { className: 'f-dur', textContent: clock(f.duration) }));
+        const b = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-btn f-dl', textContent: '↓', title: 'Download this track' });
+        b.setAttribute('aria-label', `Download track ${i + 1}`);
+        b.onclick = () => slskDownload(g, best, [f]);
+        li.append(b);
+        list.append(li);
+      });
+    };
+    // YouTube Music's titles when the track counts agree, else cleaned-up file names.
+    if (y) slskYtmAlbum(y).then((full) => fill(full.entries.length === (best.files || []).length ? full.entries.map((e) => e.title) : null)).catch(() => fill(null));
+    else fill(null);
+  }
+  return wrap;
+}
+// "03 - Artist - Waking Up.flac" → "Waking Up"
+function slskTrackTitle(name) {
+  let t = String(name).replace(/\.[^.]+$/, '').replace(/^\s*(?:disc\s*\d+\s*)?\d{1,3}(?:[-.]\d{1,3})?\s*[-._)\]]*\s*/i, '');
+  const a = slskMeta.target && slskMeta.target.artist;
+  if (a && nrm(t).startsWith(`${nrm(a)} `)) t = t.replace(/^[^-–]+?\s[-–]\s/, '');
+  return t.trim();
+}
+
+// Playing Soulseek results through YouTube Music (the player streams from there).
+async function slskPlayAlbum(y, from = 0) {
+  const full = await slskYtmAlbum(y).catch(() => null);
+  const q = ((full && full.entries) || []).filter((t) => t.url).map((t) => playItem({
+    url: t.url, title: t.title, artist: t.artist || y.artist, artistLinks: [], album: y.title, albumUrl: y.url, thumbnail: y.thumbnail, duration: t.duration }));
+  if (!q.length) return dlState('note', 'YouTube Music has no playable tracks for this album.');
+  const i = Math.min(from, q.length - 1);
+  window.Player.play(q[i], q, i);
+}
+// A song: the first YouTube Music song with the same title (and length within 5 s, when known).
+async function slskPlaySong(g, btn) {
+  const artist = (slskMeta.target && slskMeta.target.artist) || '';
+  const title = slskTrackTitle(g.name);
+  btn.disabled = true;
+  try {
+    const res = (await window.api.musicSearch([artist, title].filter(Boolean).join(' '), 'songs', 'ytmusic')) || [];
+    const want = nrm(title);
+    const hit = res.find((r) => r.url && nrm(r.title).includes(want) && (!g.duration || !r.duration || Math.abs(r.duration - g.duration) <= 5))
+      || res.find((r) => r.url && nrm(r.title).includes(want));
+    if (!hit) return dlState('note', `“${title}” isn't on YouTube Music.`);
+    const item = playItem({ url: hit.url, title: hit.title, artist: hit.artist || artist, artistLinks: [], album: hit.album || '', thumbnail: hit.thumbnail, duration: hit.duration });
+    window.Player.play(item, [item], 0);
+  } catch (e) { dlState('note', cleanMsg(e)); } finally { btn.disabled = false; }
+}
+
+// A note above the song / album when it came from a DRM service's link.
+function drmNote(v) {
+  const what = v.kind === 'track' ? 'song' : v.kind === 'album' ? 'album' : 'playlist';
+  const part = v.total ? ` Found ${v.found} of ${v.total} songs.` : '';
+  dlState('note', `${v.from} uses DRM, which Nabbit doesn't get around. This is the same ${what} from YouTube Music.${part}`);
+}

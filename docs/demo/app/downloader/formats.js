@@ -138,25 +138,28 @@
     const t = target(VIDEO_TARGETS, c.ext);
     return c.kind === 'remux' && t && t.fits ? p.video.filter(t.fits) : p.video;
   }
-  // "Highest quality possible": the uploader's original file when there is one; else the best stream,
-  // preferring Opus (YouTube's best: 48 kHz) unless another is clearly (16 kbps+) higher.
+  // "Highest quality possible": the stream "OGG (remux)" uses: the best Opus (YouTube's best, 48 kHz),
+  // else Vorbis, else the best there is.
+  // The "Best" choices: the Opus stream (as "OGG (remux)" takes it), converted, at most 48 kHz.
+  const BEST_ITEMS = [
+    { value: 'best:flac', label: 'Highest quality · FLAC (up to 48 kHz)' },
+    { value: 'best:mp3', label: 'Highest quality · MP3 320 (up to 48 kHz)' },
+  ];
   function bestSource(p) {
-    const orig = p.audio.find((f) => f.original);
-    if (orig) return orig;
     const sorted = p.audio.slice().sort((a, b) => (b.kbps || 0) - (a.kbps || 0));
-    const top = sorted[0];
-    const opus = sorted.find((f) => f.codec === 'Opus');
-    return opus && top && (opus.kbps || 0) >= (top.kbps || 0) - 16 ? opus : top || null;
+    return sorted.find((f) => f.codec === 'Opus') || sorted.find((f) => f.codec === 'Vorbis') || sorted[0] || null;
   }
-  // What "Highest quality possible" makes from a stream: FLAC, except a file that's already FLAC or an
-  // MP3 (kept as-is: FLAC can't add anything to it; same rule as main.js).
-  function bestOutcome(a) {
+  // What "Highest quality possible" makes from a stream: FLAC (16-bit) or MP3 (320 kbps) at the source's
+  // sample rate, at most 48 kHz. Kept as-is: a file already in that format, or an MP3 when FLAC was
+  // chosen (same rule as main.js).
+  function bestOutcome(a, ext = 'flac') {
     if (!a) return null;
-    const lossless = /FLAC|WAV|AIFF|ALAC|PCM/i.test(a.codec || '') || ['flac', 'wav', 'aif', 'aiff'].includes(a.ext);
-    if (a.ext === 'flac' || a.codec === 'FLAC') return { keep: true, ext: 'flac', lossless: true };
-    if (lossless) return { keep: false, ext: 'flac', lossless: true, bits: null };
-    if (a.codec === 'MP3' || a.ext === 'mp3') return { keep: true, ext: 'mp3', lossless: false };
-    return { keep: false, ext: 'flac', lossless: true, bits: 16 };
+    const rate = a.asr ? Math.min(48000, a.asr) : 48000;
+    const isFlac = a.ext === 'flac' || a.codec === 'FLAC', isMp3 = a.codec === 'MP3' || a.ext === 'mp3';
+    if (ext === 'mp3') return isMp3 ? { keep: true, ext: 'mp3', lossless: false, rate: a.asr } : { keep: false, ext: 'mp3', lossless: false, kbps: 320, rate };
+    if (isFlac) return { keep: true, ext: 'flac', lossless: true, rate: a.asr };
+    if (isMp3) return { keep: true, ext: 'mp3', lossless: false, rate: a.asr };
+    return { keep: false, ext: 'flac', lossless: true, bits: 16, rate };
   }
 
   function audioPool(p, value, videoValue) {
@@ -246,7 +249,7 @@
       const originals = keysOf(p.audio.filter(fit), audioRank).map((k) => ({ value: k, label: k }));
       const groups = groupsFor([], p.audio, AUDIO_TARGETS);
       if (!videoNone) for (const g of groups) g.group += ' · audio only';
-      const best = videoNone && p.audio.length ? [{ group: 'Best', items: [{ value: 'best:flac', label: 'Highest quality possible (FLAC)' }] }] : [];
+      const best = videoNone && p.audio.length ? [{ group: 'Best', items: BEST_ITEMS }] : [];
       return [...best, ...groups, { group: 'Original', items: originals }].filter((g) => g.items.length);
     },
     resolutionsIn: (pool) => unique(pool.map((f) => f.height)).sort((a, b) => (b || 0) - (a || 0)),
@@ -288,7 +291,7 @@
       if (!a) return null;
       const plan = { videoId: null, audioId: a.id, merge: null, post: null };
       if (ac.kind === 'remux') plan.post = { type: 'remux', ext: ac.ext };
-      if (ac.kind === 'best') plan.post = { type: 'best' };
+      if (ac.kind === 'best') plan.post = { type: 'best', ext: ac.ext === 'mp3' ? 'mp3' : 'flac' };
       if (ac.kind === 'convert') {
         plan.post = { type: 'convert', preset: target(AUDIO_TARGETS, ac.ext).preset, ext: ac.ext };
         if (transform && transform.audioKbps) plan.post.audioKbps = transform.audioKbps;
@@ -300,6 +303,7 @@
     sizeOf,
     bestSource,
     bestOutcome,
+    BEST_ITEMS,
     videoKeys: (p) => keysOf(p.video, videoRank),
     resolutions: (p, key) => unique(p.video.filter((f) => f.key === key).map((f) => f.height)).sort((a, b) => (b || 0) - (a || 0)),
     fpsList: (p, key, height) => unique(p.video.filter((f) => f.key === key && f.height === height).map((f) => f.fps)).sort((a, b) => (b || 0) - (a || 0)),

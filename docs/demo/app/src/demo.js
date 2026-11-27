@@ -5,7 +5,7 @@
   const on = {}; // event name → listeners
   const listen = (name) => (cb) => { (on[name] ||= []).push(cb); };
   const emit = (name, data) => (on[name] || []).forEach((cb) => { try { cb(data); } catch (e) { console.error(e); } });
-  let st = { isWindows: true, version: '0.1.0', startWithWindows: true, startMinimized: false, closeToTray: true, shellMenu: true,
+  let st = { slskUser: 'nabbit_demo', slskHasPassword: true, slskPort: 2234, slskOnline: true, isWindows: true, version: '0.1.0', startWithWindows: true, startMinimized: false, closeToTray: true, shellMenu: true,
     downloadDir: 'C:\\Users\\you\\Downloads', hwAccel: 'cuda', theme: 'dark', blurNow: true, extClients: [{ name: 'Firefox' }] };
   try { const t = localStorage.getItem('nabbit-demo-theme'); if (t) st.theme = t; } catch {}
   // ?solid: no window blur (for screenshots); ?light: light theme.
@@ -37,6 +37,13 @@
     return id;
   }
 
+  let slskPrefs = { ...window.SlskSearch.DEFAULT_PREFS };
+  let slskSess = null;
+  function slskEmit() {
+    const S = window.SlskSearch, sess = slskSess;
+    const view = sess.mode === 'songs' ? S.songView(sess.answers, slskPrefs, sess.target) : S.albumView(sess.answers, slskPrefs, sess.target);
+    emit('slsk-view', { id: sess.id, mode: sess.mode, items: view, total: view.length, users: sess.answers.length, status: sess.done ? '' : `Searching “${S.buildQueries(sess.target, sess.mode)[0]}”…`, done: sess.done });
+  }
   const covers = (i) => `demo/cover${i % 6}.jpg`;
   const songs = ['Intro (Headlights)', 'Night Drive', 'Overpass', 'Neon Static', 'Exit 47', 'Afterglow'];
   const audioFormats = () => Formats.parseFormats({ duration: 271, formats: [
@@ -67,11 +74,78 @@
         download: ['Downloading video · 2160p VP9', 'Downloading audio · Opus 141 kbps', 'Merging', 'Writing tags and thumbnail'],
         compress: ['Finding the best resolution for this size', 'Compressing video · libx265 · pass 1', 'Compressing video · libx265 · pass 2'],
         trim: ['Cutting at keyframes', 'Joining segments'],
+        master: ['Mastering · Stereo → Spectral → EQ → Clipper', 'Encoding FLAC · 24-bit'],
+        quick: ['Downloading video', 'Downloading audio', 'Merging'],
       }[type] || ['Converting', 'Finishing'];
-      const out = opts && opts.input ? opts.input.replace(/(\.[^.\\/]+)$/, type === 'compress' ? '_small$1' : '_edit$1') : `C:\\Users\\you\\Downloads\\${name}`;
+      const out = type === 'master' ? 'C:\\Users\\you\\Music\\Night Drive (master).flac'
+        : opts && opts.input ? opts.input.replace(/(\.[^.\\/]+)$/, type === 'compress' ? '_small$1' : '_edit$1') : `C:\\Users\\you\\Downloads\\${name}`;
       return { id: fakeJob(title || `${type} · ${name}`, [out], steps) };
     },
     cancelJob: async (id) => { const j = jobs.get(id); if (j) j.cancelled = true; },
+
+    // ----- recent downloads box + batch -----
+    recentList: async () => {
+      const now = Date.now(), m = 60000;
+      return [
+        ['Neon Static (official video).mp4', 412e6, 2 * m], ['Night Drive (live at Overpass).mp4', 1.1e9, 14 * m], ['Studio B - Neon Static.flac', 38e6, 40 * m],
+        ['Overpass Tapes · trailer.webm', 96e6, 65 * m], ['Interview · B-Side Radio.m4a', 48e6, 3 * 60 * m], ['holiday 4k_small.mp4', 210e6, 26 * 60 * m],
+        ['city lights_edit.mkv', 620e6, 30 * 60 * m], ['Night Drive (master).flac', 41e6, 50 * 60 * m],
+      ].map(([name, size, age]) => ({ path: 'C:\\Users\\you\\Downloads\\' + name, name, size, at: now - age, exists: true, title: name, url: /\.(mp4|webm)$/.test(name) ? 'https://www.youtube.com/watch?v=demo' : null }));
+    },
+    recentRemove: async () => true, recentClear: async () => true, recentTrash: async () => true,
+    recentOpen: async () => '', recentFolder: async () => '', recentThumb: async () => null, recentDrag: () => {},
+    onRecentChanged: () => {},
+    // ----- Player mode library -----
+    libGet: async () => {
+      const A = [
+        ['Hollow Arcade', 'Paper Planes', 2006, ['First Light', 'Static Bloom', 'Afterglow', 'Hold the Wheel', 'Copper Wire', 'Northbound', 'Cassette Summer', 'Interlude (Tunnel)', 'Ferris Lights', 'Paper Planes']],
+        ['Hollow Arcade', 'Lantern Season', 2008, ['Overture', 'Glasswork', 'Low Orbit', 'Saltwater Clocks', 'Harbor Gate', 'Neon Choir', 'Driftwood', 'Signal Fire']],
+        ['Studio B', 'Night Drive', 2024, ['Intro (Overpass)', 'Overpass', 'Neon Static', 'Exit Signs', 'Outro (Morning)']],
+        ['Glass Harbor', 'Tidewater', 2019, ['Low Tide', 'Lighthouse Keeper', 'Salt', 'Undertow', 'Breakwater', 'High Tide']],
+      ];
+      const tracks = [];
+      let k = 0;
+      for (const [artist, album, year, titles] of A) titles.forEach((title, i) => tracks.push({
+        path: `C:\\Users\\you\\Music\\${artist}\\${album}\\${String(i + 1).padStart(2, '0')} ${title}.flac`, ext: 'flac', title, artist: title === 'Exit Signs' ? 'Studio B;Glass Harbor;Hollow Arcade' : artist, albumArtist: artist, album, track: i + 1, disc: 1, year,
+        duration: 150 + ((k++ * 37) % 150), codec: 'FLAC', rate: album === 'Night Drive' ? 48000 : 44100, bits: 16, kbps: 900 + (k * 13) % 200, channels: 2,
+        hasCover: false, hasLyrics: title === 'Static Bloom', playable: true, size: 3e7, mtime: Date.now() - k * 86400000 * 3,
+        rating: title === 'Static Bloom' ? 5 : title === 'Afterglow' ? 4 : 0, loved: title === 'Static Bloom',
+      }));
+      // A music video beside one song (same name): the cover's Video toggle shows it.
+      const ns = tracks.find((t) => t.title === 'Neon Static');
+      tracks.push({ ...ns, path: ns.path.replace(/\.flac$/, '.mp4'), ext: 'mp4', codec: 'AAC', hasVideo: true, rating: 0, loved: false, track: 0, album: '' });
+      return { folders: ['C:\\Users\\you\\Music', 'C:\\Users\\you\\Downloads'], tracks, scanning: false };
+    },
+    libScan: async () => true, libAddFolder: async () => null, libRemoveFolder: async () => ['C:\\Users\\you\\Music'],
+    libRate: async (_p, o) => o, libCover: async () => null,
+    mediaUrl: async () => 'demo/track.mp3',
+    lastfmStatus: async () => ({ key: '', hasSecret: false, user: '', on: true, love: true, pending: 0, connecting: false }),
+    lastfmKeys: async () => { throw new Error('Not in the demo.'); }, lastfmConnect: async () => { throw new Error('Not in the demo.'); },
+    lastfmCancel: async () => ({}), lastfmDisconnect: async () => ({}), lastfmSet: async (o) => ({ key: '', hasSecret: false, user: '', on: o.on !== false, love: o.love !== false, pending: 0 }),
+    lastfmNow: async () => false, lastfmScrobble: async () => false, lastfmLove: async () => false, onLastfmStatus: () => {},
+    plGet: async () => { try { return JSON.parse(localStorage.getItem('demo.playlists') || '[]'); } catch { return []; } },
+    plSet: async (list) => { localStorage.setItem('demo.playlists', JSON.stringify(list)); return list; },
+    wavePeaks: async (p) => Array.from({ length: 1200 }, (_, i) => Math.min(1, 0.25 + 0.55 * Math.abs(Math.sin(i / 37 + p.length)) * (0.6 + 0.4 * Math.sin(i / 7)) ** 2)),
+    wavePeaksStream: async () => Array.from({ length: 1200 }, (_, i) => 0.3 + 0.5 * Math.abs(Math.sin(i / 23))),
+    fxSource: async () => `${await (await fetch('../mastering.js')).text()}\n${await (await fetch('../player-core.js')).text()}`,
+    vstInfo: async () => ({ host: false, dirs: ['C:\\Program Files\\Common Files\\VST3'], plugins: [{ name: 'Demo Reverb', path: 'C:\\Program Files\\Common Files\\VST3\\Demo Reverb.vst3' }, { name: 'Demo Tape', path: 'C:\\Program Files\\Common Files\\VST3\\Demo Tape.vst3' }] }),
+    vstAddFolder: async () => null,
+    vstStart: async () => ({ ok: false, error: "The plugin host isn't built yet (see vsthost\\README.md)." }),
+    vstLoad: async () => ({ ok: false, error: 'Not in the demo.' }),
+    vstState: async () => ({ ok: false }),
+    vstCmd: () => {}, vstAudio: () => {}, onVstAudio: () => {}, onVstEvent: () => {},
+    libYtLoop: async () => { await wait(400); throw new Error('No music video in the demo.'); },
+    streamLoop: async () => { await wait(400); throw new Error('No music video in the demo.'); },
+    libYtVideo: async (p, o = {}) => { await wait(900); const name = p.split('\\').pop().replace(/^\d+ |\.\w+$/g, ''); return { id: 'demo', file: 'C:\\Users\\you\\AppData\\Local\\Temp\\nabbit-mv\\demo.mp4', synced: !o.next, title: `${name} (Official Music Video)`, channel: 'Demo VEVO', duration: 200 }; },
+    onLibYtProgress: () => {},
+    libLyrics: async () => ({ source: 'lrclib', text: '[00:00.50]Streetlights counting down the miles\n[00:04.00]Radio hum and open skies\n[00:07.50]We were neon, we were static\n[00:11.00]Glowing out of every line' }),
+    onLibChanged: () => {}, onLibProgress: () => {},
+    batchResolve: async (url) => {
+      await wait(600 + Math.random() * 600);
+      if (/playlist|list=/.test(url)) return { playlist: 'Night Drive', items: ['Intro', 'Overpass', 'Neon Static', 'Exit Signs'].map((t, i) => ({ url: `https://www.youtube.com/watch?v=nd${i}`, title: `Studio B - ${t}`, duration: 180 + i * 41, thumbnail: null })) };
+      const id = (url.match(/[?&]v=([\w-]+)/) || [])[1] || url.split('/').pop();
+      return { playlist: null, items: [{ url, title: `Video ${id}`, duration: 200 + (id.length * 37) % 900, thumbnail: null }] };
+    },
 
     // ----- music downloader & player -----
     musicSearch: async (q, type) => {
@@ -125,6 +199,49 @@
     trimSnapshot: async () => 'demo/clip_00-00-04_000.jpg',
     trimPreview: async () => null,
 
+    // ----- audio tools: a sample result (the real analysis runs on the file in Nabbit) -----
+    edAnalyze: async (file) => {
+      await wait(1400);
+      const A = window.Analyzer;
+      return { duration: 213, name: String(file).split(/[\\/]/).pop(),
+        tempo: { bpm: 113, confidence: 0.82, offset: 0.42, half: 56.5, double: 226 },
+        key: { tonic: 8, mode: 'major', name: 'Ab Major', camelot: A.camelot(8, 'major'), confidence: 0.86, tuningHz: 441,
+          relative: { tonic: 5, mode: 'minor', name: 'F Minor' }, alternatives: [{ name: 'F Minor', tonic: 5, mode: 'minor' }] } };
+    },
+    edTags: async () => { await wait(400); return true; },
+    // ----- mastering: a short made-up loop (the real app opens your song) -----
+    msLoad: async (file) => {
+      await wait(300);
+      const sr = 44100, secs = 16, n = sr * secs;
+      const L = new Float32Array(n), R = new Float32Array(n);
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1;
+      const beat = 0.5; // 120 BPM
+      const chords = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
+      const hz = (m) => 440 * 2 ** ((m - 69) / 12);
+      for (let i = 0; i < n; i++) {
+        const t = i / sr, b = t / beat, tb = (b % 1) * beat, bar = Math.floor(b / 4) % 4;
+        const kick = Math.sin(2 * Math.PI * (50 + 90 * Math.exp(-tb * 30)) * tb) * Math.exp(-tb * 7) * 0.9;
+        const hat = ((b * 2) % 1) * beat * 0.5 < 0.04 ? rnd() * Math.exp(-((b * 2) % 1) * beat * 0.5 * 90) * 0.25 : 0;
+        const bass = Math.sin(2 * Math.PI * hz(chords[bar][0] - 24) * t) * 0.35 * (1 - Math.exp(-tb * 40));
+        let pad = 0, padR = 0;
+        chords[bar].forEach((m, k) => { pad += Math.sin(2 * Math.PI * hz(m) * t * 1.002) * 0.08; padR += Math.sin(2 * Math.PI * hz(m) * t * 0.998 + k) * 0.08; });
+        L[i] = (kick + bass + hat * 0.6 + pad) * 0.5;
+        R[i] = (kick + bass + hat + padR) * 0.5;
+      }
+      // As a 16-bit WAV, like a real file's bytes.
+      const data = new DataView(new ArrayBuffer(44 + n * 4));
+      const str = (o, t) => [...t].forEach((c, j) => data.setUint8(o + j, c.charCodeAt(0)));
+      str(0, 'RIFF'); data.setUint32(4, 36 + n * 4, true); str(8, 'WAVEfmt '); data.setUint32(16, 16, true); data.setUint16(20, 1, true);
+      data.setUint16(22, 2, true); data.setUint32(24, sr, true); data.setUint32(28, sr * 4, true); data.setUint16(32, 4, true); data.setUint16(34, 16, true);
+      str(36, 'data'); data.setUint32(40, n * 4, true);
+      for (let i = 0; i < n; i++) {
+        data.setInt16(44 + i * 4, Math.max(-1, Math.min(1, L[i])) * 32767, true);
+        data.setInt16(46 + i * 4, Math.max(-1, Math.min(1, R[i])) * 32767, true);
+      }
+      return { name: 'Night Drive (demo loop).wav', duration: secs, data: new Uint8Array(data.buffer) };
+    },
+
     // ----- compressor -----
     cpScan: async () => { await wait(300); return [
       { path: 'C:\\Users\\you\\Videos\\holiday 4k.mov', name: 'holiday 4k.mov', kind: 'video', size: 812e6, duration: 214, width: 3840, height: 2160, fps: 60 },
@@ -133,6 +250,43 @@
       { path: 'C:\\Users\\you\\Pictures\\reaction.gif', name: 'reaction.gif', kind: 'gif', size: 14e6, duration: 6, width: 480, height: 270 },
       { path: 'C:\\Users\\you\\Documents\\contract scan.pdf', name: 'contract scan.pdf', kind: 'pdf', size: 22e6 }]; },
     cpSize: async (p) => (/holiday/.test(p) ? 9.62e6 : /IMG/.test(p) ? 0.41e6 : /interview/.test(p) ? 8.6e6 : /reaction/.test(p) ? 0.9e6 : 3.1e6),
+
+    // ----- Soulseek: sample answers arrive over two seconds, ranked by the real rules (slsk-search.js) -----
+    slskStatus: async () => ({ configured: true, online: true, port: 2234 }),
+    slskAccount: async () => ({ online: true, port: 2234 }),
+    slskStop: async () => null,
+    slskPrefsGet: async () => slskPrefs,
+    slskPrefs: async (p) => { slskPrefs = { ...slskPrefs, ...p, formats: p.formats ? (p.formats.length ? p.formats : SlskSearch.AUDIO) : slskPrefs.formats }; if (slskSess) slskEmit(); return slskPrefs; },
+    slskSource: async () => [],
+    // Batch inputs: the real parsers; links and files can't be read in a browser demo.
+    slskResolve: async (text, mode) => window.SlskInputs.resolveInputs(text, mode, {
+      readFile: async () => { throw new Error('The demo can\'t open files.'); },
+      fetchText: async () => { throw new Error('The demo can\'t read web pages.'); },
+      fetchJson: async () => { throw new Error('The demo can\'t reach MusicBrainz.'); },
+      ytJson: async () => ({ entries: [{ title: 'Studio B - Night Drive (Official Video)', duration: 211 }, { title: 'Studio B - Overpass', duration: 242 }, { title: 'Exit 47 [Lyrics]', channel: 'Studio B - Topic', duration: 304 }] }),
+    }),
+    onSlskResolveProgress: listen('slsk-resolve-progress'),
+    slskSearch: async (req) => {
+      const S = window.SlskSearch;
+      const target = req.target || (() => { const { artist, title } = S.parseQuery(req.query); return { artist, title, album: title }; })();
+      slskSess = { id: ++jobN, mode: req.mode, target, answers: [], done: false };
+      const sess = slskSess;
+      const tracks = songs.map((t, i) => [`0${i + 1} - ${t}`, 180 + i * 31]);
+      const user = (name, dir, ext, q, slot, queue, speed) => ({ user: name, slotFree: slot, queue, speed,
+        files: tracks.map(([n, d]) => { const fn = `${n}.${ext}`; return { file: `@@music\\Studio B\\${dir}\\${fn}`, name: fn, ext, duration: d,
+          size: Math.round(d * (q.bitrate ? q.bitrate * 125 : (q.bitDepth || 16) * (q.sampleRate || 44100) * 2 / 8 * 0.6)), ...q }; }) });
+      const answers = [
+        user('vinylhound', 'Night Drive (2024) [FLAC 24-96]', 'flac', { bitDepth: 24, sampleRate: 96000 }, false, 4, 2.1e6),
+        user('quietkeys', 'Night Drive [16-44]', 'flac', { bitDepth: 16, sampleRate: 44100 }, true, 0, 4.8e6),
+        user('night_owl', 'Studio B - Night Drive (2024) FLAC', 'flac', { bitDepth: 16, sampleRate: 44100 }, true, 0, 1.2e6),
+        user('moth_radio', 'Studio B - Night Drive (V0)', 'mp3', { bitrate: 245, vbr: true }, true, 0, 900e3),
+        user('tapeloop', 'Night Drive', 'mp3', { bitrate: 320 }, true, 1, 1.5e6),
+        user('crate_digger', 'Overpass Tapes', 'mp3', { bitrate: 320 }, true, 0, 2e6),
+      ];
+      answers.forEach((a, i) => setTimeout(() => { if (slskSess !== sess) return; sess.answers.push(a); sess.done = i === answers.length - 1; slskEmit(); }, 400 + i * 350));
+      return { id: sess.id, queries: S.buildQueries(target, req.mode, slskPrefs.fallbackLevel), target };
+    },
+    onSlskView: listen('slsk-view'), onSlskStatus: listen('slsk-status'),
 
     // ----- events -----
     onSettings: listen('settings'), onProgress: listen('progress'), onDone: listen('done'), onStatus: listen('status'), onLog: listen('log'),

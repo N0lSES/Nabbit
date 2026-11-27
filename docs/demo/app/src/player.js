@@ -7,7 +7,7 @@
   const $ = (id) => document.getElementById(id);
   const audio = new Audio();
   audio.preload = 'auto';
-  const state = { queue: [], idx: -1, seq: 0, key: null, lines: [], synced: false, active: -1, quality: 'normal', retried: false, dragging: false, cachedNow: false };
+  const state = { queue: [], idx: -1, seq: 0, key: null, lines: [], synced: false, active: -1, quality: 'normal', retried: false, dragging: false, cachedNow: false, download: true };
   const store = (k, v) => { try { localStorage.setItem(k, v); } catch { /* not saved */ } };
   const load = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 
@@ -24,9 +24,10 @@
   function setState(kind, text) {
     const el = $('pl-state');
     el.className = `pl-state ${kind || ''}`;
-    el.textContent = text || ({ loading: 'Loading', buffering: 'Buffering', stream: 'Streaming', cached: 'Cached', error: 'Error' }[kind] || '');
-    el.title = kind === 'cached' ? 'Saved on this PC: plays offline' : kind === 'stream' ? 'Playing from the site; saving to the cache as it plays' : (text || '');
-    if (state.via && (kind === 'stream' || kind === 'cached')) {
+    el.textContent = text || ({ loading: 'Loading', buffering: 'Buffering', stream: 'Streaming', cached: 'Cached', local: 'Local file', error: 'Error' }[kind] || '');
+    el.title = kind === 'cached' ? 'Saved on this PC: plays offline' : kind === 'stream' ? 'Playing from the site; saving to the cache as it plays'
+      : kind === 'local' ? 'Downloaded to a temporary file before playing; deleted when the song changes' : (text || '');
+    if (state.via && (kind === 'stream' || kind === 'cached' || kind === 'local')) {
       el.textContent = 'Via YT Music';
       el.title = "SoundCloud's copy is DRM-protected, so this plays the same song from YouTube Music.";
     }
@@ -91,8 +92,9 @@
     const it = state.queue[i];
     const seq = ++state.seq;
     showItem(it);
-    setState('loading', 'Loading');
+    setState('loading', state.download ? 'Downloading' : 'Loading');
     audio.pause();
+    state.loadingUrl = it.url;
     paintProgress(0, it.duration || 0);
     lyricsFor(it);
     try {
@@ -105,10 +107,11 @@
       }
       state.key = s.key;
       state.retried = fresh;
-      state.cachedNow = !!s.cached;
+      state.cachedNow = !!(s.cached || s.local); // a whole file: seek anywhere
       // SoundCloud's copy was DRM-protected: this is the same song from YouTube Music.
       state.via = !!s.replaced;
-      setState(s.cached ? 'cached' : 'stream', s.cached ? 'Cached' : 'Streaming');
+      if (s.local) setState('local', 'Local file');
+      else setState(s.cached ? 'cached' : 'stream', s.cached ? 'Cached' : 'Streaming');
       audio.src = s.src;
       if (at) audio.addEventListener('loadedmetadata', () => { audio.currentTime = Math.min(at, (audio.duration || at) - 0.5); }, { once: true });
       if (autoplay) audio.play().catch(() => {});
@@ -149,6 +152,7 @@
   $('pl-prev').onclick = prev;
   $('pl-close').onclick = () => {
     state.seq++;
+    window.api.streamRelease(); // the temporary song files go
     audio.pause();
     audio.removeAttribute('src');
     audio.load();
@@ -261,6 +265,23 @@
     paintVolume();
   };
   paintVolume();
+
+  // ---------- Download first / stream ----------
+  // On (the default): each song is downloaded whole into a temporary file, then played from it (deleted
+  // when the song changes). Off: it streams from the site straight away.
+  const dlBtn = $('pl-dl');
+  const paintDl = () => { dlBtn.setAttribute('aria-pressed', String(state.download)); dlBtn.classList.add('has'); dlBtn.textContent = state.download ? 'DL FIRST' : 'STREAM'; };
+  window.api.settingsGet().then((st) => { state.download = st.playDownload !== false; paintDl(); });
+  dlBtn.addEventListener('click', () => {
+    state.download = !state.download;
+    paintDl();
+    window.api.settingsSet({ playDownload: state.download });
+  });
+  window.api.onStreamProgress(({ url, percent }) => {
+    const it = current();
+    if (!it || it.url !== url || !$('pl-state').classList.contains('loading')) return;
+    $('pl-state').textContent = percent == null ? 'Downloading' : `Downloading ${percent}%`;
+  });
 
   // ---------- Quality (changing it reloads the song at the same point, at the new quality) ----------
   const qSel = $('pl-q');
@@ -386,6 +407,8 @@
       loadTrack(Math.min(i, state.queue.length - 1));
     },
     get nowPlaying() { return current(); },
+    /** Pauses the music (another tool is about to play something). */
+    pause() { if (!audio.paused) audio.pause(); },
     /** Looks a song up ahead of time (hovering its ▶), so it starts quicker. */
     warm(url) { if (url) window.api.streamWarm(url, state.quality); },
   };

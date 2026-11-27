@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; media-src 'self' file: http://127.0.0.1:*; img-src 'self' https: data:" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self' blob:; media-src 'self' file: http://127.0.0.1:*; img-src 'self' https: data:" />
   <title>Nabbit</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -18,7 +18,25 @@
     <div class="brand"><img class="logo pulse" src="assets/icon.png" alt="" />
       <div class="brand-text"><span class="brand-name">Nabbit</span><span class="brand-sub">Media toolbox</span></div>
     </div>
+    <!-- Toolbox / Player: the tools, or a music player for your own files -->
+    <div class="mode-switch" id="mode-switch" role="radiogroup" aria-label="Mode">
+      <button type="button" data-mode-sw="toolbox" role="radio" aria-checked="true" class="on">Toolbox</button>
+      <button type="button" data-mode-sw="player" role="radio" aria-checked="false">Player<span class="mode-eq" id="mode-eq" aria-hidden="true"><i></i><i></i><i></i></span></button>
+    </div>
     <div class="bars run brand-bars" aria-hidden="true"></div>
+    <!-- Player mode's sidebar: the library -->
+    <div class="lib-side" id="lib-side">
+      <input type="text" id="lib-q" class="lib-q" placeholder="Filter library…" aria-label="Filter the library" spellcheck="false" />
+      <div class="lib-label">■ Library</div>
+      <div class="lib-views" id="lib-views" role="listbox" aria-label="Library views"></div>
+      <div class="lib-label">■ Playlists <button type="button" class="lib-mini" id="lib-newpl" title="A new, empty playlist">+ New</button></div>
+      <div class="lib-pls" id="lib-pls" role="listbox" aria-label="Playlists"></div>
+      <div class="lib-label">■ Artists</div>
+      <div class="lib-artists" id="lib-artists" role="listbox" aria-label="Artists"></div>
+      <div class="lib-label">■ Folders <button type="button" class="lib-mini" id="lib-rescan" title="Look for new and changed files">Rescan</button></div>
+      <div class="lib-folders" id="lib-folders"></div>
+      <button type="button" class="lib-mini lib-add" id="lib-add">+ Add folder</button>
+    </div>
     <div class="side-label" aria-hidden="true">■ Tools</div>
     <nav>
       <button class="tab active" data-tool="download" data-mode="video"><span class="code" aria-hidden="true">01</span><span class="tab-label">Video Downloader</span><span class="arrow" aria-hidden="true">◂</span></button>
@@ -26,15 +44,13 @@
       <button class="tab" data-tool="convert"><span class="code" aria-hidden="true">03</span><span class="tab-label">Converter</span><span class="arrow" aria-hidden="true">◂</span></button>
       <button class="tab" data-tool="trim"><span class="code" aria-hidden="true">04</span><span class="tab-label">Trimmer</span><span class="arrow" aria-hidden="true">◂</span></button>
       <button class="tab" data-tool="compress"><span class="code" aria-hidden="true">05</span><span class="tab-label">Compressor</span><span class="arrow" aria-hidden="true">◂</span></button>
-      <button class="tab" data-tool="editor"><span class="code" aria-hidden="true">06</span><span class="tab-label">Audio Editor</span><span class="arrow" aria-hidden="true">◂</span></button>
+      <button class="tab" data-tool="editor"><span class="code" aria-hidden="true">06</span><span class="tab-label">Audio Tools</span><span class="arrow" aria-hidden="true">◂</span></button>
     </nav>
     <div class="side-deco" aria-hidden="true"><img class="hud-ink breathe" src="assets/hud/rings.svg" alt="" /></div>
-    <!-- Shared job queue, collapsed by default -->
-    <details id="jobs-box" class="side-jobs">
-      <summary><span class="live" aria-hidden="true"></span><span>Jobs</span><span id="jobs-count" class="jobs-count hidden"></span></summary>
-      <div class="jobs-tools"><button type="button" id="jobs-clear" class="link-btn hidden" title="Remove finished jobs from the list (running ones stay)">Clear all</button></div>
-      <div id="jobs"><p class="empty">No jobs yet.</p></div>
-    </details>
+    <!-- Shows / hides the Recent downloads box on the right -->
+    <button type="button" class="side-recent" id="recent-toggle" aria-controls="recent" aria-expanded="true" title="Recent downloads and running jobs">
+      <span class="live" aria-hidden="true"></span><span>Recent</span><span id="jobs-count" class="jobs-count hidden"></span>
+    </button>
     <div class="side-foot">
       <button type="button" class="tab settings-tab" data-tool="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M12.78 6.52 L14.70 6.85 L14.70 9.15 L12.78 9.48 L12.42 10.33 L13.55 11.93 L11.93 13.55 L10.33 12.42 L9.48 12.78 L9.15 14.70 L6.85 14.70 L6.52 12.78 L5.67 12.42 L4.07 13.55 L2.45 11.93 L3.58 10.33 L3.22 9.48 L1.30 9.15 L1.30 6.85 L3.22 6.52 L3.58 5.67 L2.45 4.07 L4.07 2.45 L5.67 3.58 L6.52 3.22 L6.85 1.30 L9.15 1.30 L9.48 3.22 L10.33 3.58 L11.93 2.45 L13.55 4.07 L12.42 5.67 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
       <div class="version" id="app-version">v0.1.0</div>
@@ -67,17 +83,68 @@
         <button type="submit" class="search-btn" id="dl-search">Search</button>
       </form>
 
+      <!-- Video Downloader: one link, or a batch of links (and playlists) downloaded as a queue -->
+      <div class="dl-modes video-only" role="radiogroup" aria-label="Links">
+        <button type="button" class="dl-mode on" data-bmode="one" role="radio" aria-checked="true">One link</button>
+        <button type="button" class="dl-mode" data-bmode="batch" role="radio" aria-checked="false">Batch<span id="bq-mode-n"></span></button>
+      </div>
+      <div class="bq-in video-only hidden" id="bq-in">
+        <label for="bq-links" class="sr-only">Links, one per line</label>
+        <textarea id="bq-links" rows="4" spellcheck="false" placeholder="Paste links, one per line (a playlist adds every video)"></textarea>
+        <div class="bq-in-foot">
+          <span class="bq-lab">Each as</span>
+          <select id="bq-quality" aria-label="Quality"></select>
+          <select id="bq-container" aria-label="Format"><option value="mp4">MP4</option><option value="mkv">MKV</option><option value="webm">WEBM</option><option value="mp3">Audio · MP3</option><option value="m4a">Audio · M4A</option></select>
+          <span class="bq-note hint small" id="bq-note"></span>
+          <button type="button" class="ghost" id="bq-clear-in">Clear</button>
+          <button type="button" class="primary" id="bq-add">Add to queue</button>
+        </div>
+      </div>
+      <div class="bq video-only hidden" id="bq">
+        <div class="bq-head">
+          <span>■ Queue</span><b id="bq-count">00</b><span class="bq-dim" id="bq-par" title="Downloads running at the same time">2 at a time</span>
+          <span class="bq-sp"></span>
+          <span class="bq-dim" id="bq-left"></span>
+          <button type="button" class="vz-btn" id="bq-pause">Pause</button>
+          <button type="button" class="vz-btn" id="bq-clear-done" title="Remove finished and failed rows">Clear done</button>
+        </div>
+        <ol class="bq-list" id="bq-list"></ol>
+        <div class="bq-foot hint small">Drag rows to reorder · ✕ removes a row (a running one is cancelled)</div>
+      </div>
+
       <!-- Music Downloader: what to search for when the box holds words instead of a link -->
       <div id="mu-types" class="mu-types music-only" role="radiogroup" aria-label="Search for">
         <button type="button" class="chip active" data-type="songs" role="radio" aria-checked="true">Songs</button>
         <button type="button" class="chip" data-type="albums" role="radio" aria-checked="false">Albums</button>
         <button type="button" class="chip" data-type="playlists" role="radio" aria-checked="false">Playlists</button>
         <button type="button" class="chip" data-type="artists" role="radio" aria-checked="false">Artists</button>
+        <button type="button" class="chip slsk-batch-btn hidden" id="slsk-batch-btn" aria-pressed="false" title="Find many at once: lists, CSV files, playlists, links">Batch</button>
         <div id="mu-provider" class="mu-provider" role="radiogroup" aria-label="Search on">
           <button type="button" class="seg active" data-provider="ytmusic" role="radio" aria-checked="true">YouTube Music</button>
           <button type="button" class="seg" data-provider="soundcloud" role="radio" aria-checked="false">SoundCloud</button>
+          <button type="button" class="seg" data-provider="soulseek" role="radio" aria-checked="false">Soulseek</button>
         </div>
       </div>
+
+      <!-- Soulseek batch: many inputs (lists, CSV, playlists, links) found and downloaded one after another -->
+      <section id="slsk-batch" class="slsk-batch hidden" aria-label="Soulseek batch">
+        <div class="sb-head"><span>■ Batch</span><button type="button" class="mb-x" id="sb-close" aria-label="Close batch">✕</button></div>
+        <textarea id="sb-text" rows="6" spellcheck="false" placeholder="One per line:
+Artist - Album   ·   s:Artist - Song   ·   title=Song, artist=Name, length=215
+Playlist / album links: YouTube, YouTube Music, Spotify, SoundCloud, Bandcamp, MusicBrainz
+slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
+&quot;Artist - Album&quot; &quot;format=flac; album-track-count&gt;=10&quot;   (conditions, as in sockseek)"></textarea>
+        <div class="sb-row">
+          <button type="button" class="ghost" id="sb-file">Add file…</button>
+          <span class="hint small" id="sb-note">Plain lines are searched as <b id="sb-mode">albums</b> (the chip above); s: makes a line a song.</span>
+          <button type="button" class="ghost" id="sb-preview">Preview</button>
+        </div>
+        <div id="sb-list" class="sb-list hidden"></div>
+        <div class="sb-row sb-go-row hidden" id="sb-go-row">
+          <span class="hint small" id="sb-count"></span>
+          <button type="button" class="primary" id="sb-go">Find &amp; download all</button>
+        </div>
+      </section>
 
       <div id="dl-state" class="dl-state hidden"></div>
 
@@ -308,47 +375,165 @@
     </section>
 
 
-    <!-- Audio Editor (placeholder: the tools are on the way) -->
+    <!-- Audio Tools: a list of tools that fold down to one row each -->
     <section class="panel" id="editor">
-      <div class="hud-tag" aria-hidden="true"><span>■ 06* ——— Audio editor</span><span class="sys">SYS.STANDBY <i class="dia">◆</i><i class="dia">◆</i><i class="dia">◆</i></span></div>
-      <div class="hud-title"><h1>Audio Editor</h1><span class="caret" aria-hidden="true"></span><span class="ticks wipe" aria-hidden="true"></span></div>
-      <p class="hint">Find a song's key and tempo, with editing tools to follow. <span class="soon-tag">Preview</span> These tools are on the way: the controls below don't work yet.</p>
+      <div class="hud-tag" aria-hidden="true"><span>■ 06* ——— Audio tools</span><span class="sys">SYS.STANDBY <i class="dia">◆</i><i class="dia">◆</i><i class="dia">◆</i></span></div>
+      <div class="hud-title"><h1>Audio Tools</h1><span class="caret" aria-hidden="true"></span><span class="ticks wipe" aria-hidden="true"></span></div>
+      <p class="hint">Find a song's key, tempo and tuning, see its scale on the piano, and write BPM and key into the file's tags.</p>
 
-      <div class="ed-drop drop" aria-disabled="true">
-        <p>Drop an audio file here, or</p>
-        <button type="button" class="ghost" disabled>Add file…</button>
-      </div>
+      <!-- Key & BPM finder (laid out like Antares Auto-Key: source · result · scale · piano) -->
+      <div class="ed-tools-bar"><span>■ Tools <b id="ed-tools-n"></b></span><button type="button" class="ghost" id="ed-tools-all">Collapse all</button></div>
+      <div class="ed-tools" id="ed-tools">
+      <details class="ak ed-tool" id="tool-keybpm">
+        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Key &amp; BPM finder</span><span class="ak-sub">Key · tempo · tuning · scale</span></summary>
+        <div class="ak-methods" role="tablist" aria-label="Detection method">
+          <button type="button" class="ak-method active" role="tab" aria-selected="true" data-m="file" id="ak-m-file">
+            <span class="ak-m-label">Use file</span>
+            <svg viewBox="0 0 48 56" aria-hidden="true"><path d="M6 2h24l12 12v40H6z" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M30 2v12h12" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M13 36v-6M18 40v-14M23 42v-18M28 38v-10M33 35v-4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+            <span class="ak-m-file" id="ak-file">Drop a song here, or click</span>
+          </button>
+          <button type="button" class="ak-method" role="tab" aria-selected="false" data-m="manual" id="ak-m-manual">
+            <span class="ak-m-label">Manual</span>
+            <svg viewBox="0 0 56 48" aria-hidden="true"><rect x="2" y="2" width="52" height="44" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M15 2v44M28 2v44M41 2v44" stroke="currentColor" stroke-width="2"/><rect x="11" y="2" width="8" height="26" fill="currentColor"/><rect x="24" y="2" width="8" height="26" fill="currentColor"/><rect x="37" y="2" width="8" height="26" fill="currentColor"/></svg>
+            <span class="ak-m-file">Pick a key, tap the tempo</span>
+          </button>
+        </div>
 
-      <div class="ed-wave" aria-hidden="true">
-        <div class="ed-wave-head"><span>■ Waveform</span><span class="ed-time">00:00.000 / --:--.---</span></div>
-        <svg class="ed-wave-svg" viewBox="0 0 600 60" preserveAspectRatio="none"><rect x="0" y="23.2" width="3" height="13.6"/><rect x="5" y="23.5" width="3" height="13.0"/><rect x="10" y="20.4" width="3" height="19.1"/><rect x="15" y="22.8" width="3" height="14.3"/><rect x="20" y="19.4" width="3" height="21.1"/><rect x="25" y="19.7" width="3" height="20.7"/><rect x="30" y="21.0" width="3" height="18.0"/><rect x="35" y="16.9" width="3" height="26.1"/><rect x="40" y="19.8" width="3" height="20.3"/><rect x="45" y="15.8" width="3" height="28.4"/><rect x="50" y="18.3" width="3" height="23.3"/><rect x="55" y="17.6" width="3" height="24.8"/><rect x="60" y="13.9" width="3" height="32.3"/><rect x="65" y="9.3" width="3" height="41.4"/><rect x="70" y="16.1" width="3" height="27.7"/><rect x="75" y="14.9" width="3" height="30.2"/><rect x="80" y="10.6" width="3" height="38.8"/><rect x="85" y="7.4" width="3" height="45.3"/><rect x="90" y="11.4" width="3" height="37.1"/><rect x="95" y="13.6" width="3" height="32.8"/><rect x="100" y="8.3" width="3" height="43.3"/><rect x="105" y="17.9" width="3" height="24.2"/><rect x="110" y="10.9" width="3" height="38.2"/><rect x="115" y="16.7" width="3" height="26.5"/><rect x="120" y="18.6" width="3" height="22.9"/><rect x="125" y="19.3" width="3" height="21.3"/><rect x="130" y="18.4" width="3" height="23.1"/><rect x="135" y="15.4" width="3" height="29.2"/><rect x="140" y="20.4" width="3" height="19.2"/><rect x="145" y="18.2" width="3" height="23.6"/><rect x="150" y="18.3" width="3" height="23.4"/><rect x="155" y="20.3" width="3" height="19.5"/><rect x="160" y="19.4" width="3" height="21.2"/><rect x="165" y="22.4" width="3" height="15.2"/><rect x="170" y="22.4" width="3" height="15.1"/><rect x="175" y="21.5" width="3" height="16.9"/><rect x="180" y="18.6" width="3" height="22.9"/><rect x="185" y="19.9" width="3" height="20.2"/><rect x="190" y="20.4" width="3" height="19.2"/><rect x="195" y="18.5" width="3" height="23.1"/><rect x="200" y="19.1" width="3" height="21.8"/><rect x="205" y="19.9" width="3" height="20.2"/><rect x="210" y="16.5" width="3" height="27.1"/><rect x="215" y="17.0" width="3" height="25.9"/><rect x="220" y="20.1" width="3" height="19.8"/><rect x="225" y="18.0" width="3" height="24.0"/><rect x="230" y="18.6" width="3" height="22.8"/><rect x="235" y="16.7" width="3" height="26.6"/><rect x="240" y="18.1" width="3" height="23.7"/><rect x="245" y="21.3" width="3" height="17.4"/><rect x="250" y="18.2" width="3" height="23.7"/><rect x="255" y="23.4" width="3" height="13.3"/><rect x="260" y="22.6" width="3" height="14.7"/><rect x="265" y="20.5" width="3" height="19.0"/><rect x="270" y="22.7" width="3" height="14.6"/><rect x="275" y="20.1" width="3" height="19.8"/><rect x="280" y="22.1" width="3" height="15.8"/><rect x="285" y="17.3" width="3" height="25.4"/><rect x="290" y="15.9" width="3" height="28.3"/><rect x="295" y="16.6" width="3" height="26.8"/><rect x="300" y="13.7" width="3" height="32.6"/><rect x="305" y="17.7" width="3" height="24.5"/><rect x="310" y="14.4" width="3" height="31.2"/><rect x="315" y="15.1" width="3" height="29.8"/><rect x="320" y="15.2" width="3" height="29.6"/><rect x="325" y="16.3" width="3" height="27.4"/><rect x="330" y="13.4" width="3" height="33.1"/><rect x="335" y="13.0" width="3" height="34.1"/><rect x="340" y="17.0" width="3" height="26.0"/><rect x="345" y="16.0" width="3" height="28.0"/><rect x="350" y="20.8" width="3" height="18.4"/><rect x="355" y="16.7" width="3" height="26.6"/><rect x="360" y="17.5" width="3" height="24.9"/><rect x="365" y="15.7" width="3" height="28.6"/><rect x="370" y="17.2" width="3" height="25.7"/><rect x="375" y="20.7" width="3" height="18.5"/><rect x="380" y="20.2" width="3" height="19.5"/><rect x="385" y="18.6" width="3" height="22.9"/><rect x="390" y="22.4" width="3" height="15.1"/><rect x="395" y="19.6" width="3" height="20.8"/><rect x="400" y="21.2" width="3" height="17.6"/><rect x="405" y="21.2" width="3" height="17.5"/><rect x="410" y="21.3" width="3" height="17.4"/><rect x="415" y="15.9" width="3" height="28.2"/><rect x="420" y="20.0" width="3" height="19.9"/><rect x="425" y="18.7" width="3" height="22.6"/><rect x="430" y="17.1" width="3" height="25.8"/><rect x="435" y="12.7" width="3" height="34.6"/><rect x="440" y="18.9" width="3" height="22.2"/><rect x="445" y="15.4" width="3" height="29.1"/><rect x="450" y="14.3" width="3" height="31.4"/><rect x="455" y="11.2" width="3" height="37.6"/><rect x="460" y="11.7" width="3" height="36.5"/><rect x="465" y="11.5" width="3" height="37.0"/><rect x="470" y="16.9" width="3" height="26.2"/><rect x="475" y="16.1" width="3" height="27.9"/><rect x="480" y="17.0" width="3" height="26.0"/><rect x="485" y="13.4" width="3" height="33.1"/><rect x="490" y="13.8" width="3" height="32.5"/><rect x="495" y="20.4" width="3" height="19.2"/><rect x="500" y="20.9" width="3" height="18.2"/><rect x="505" y="21.2" width="3" height="17.5"/><rect x="510" y="22.0" width="3" height="16.1"/><rect x="515" y="21.4" width="3" height="17.2"/><rect x="520" y="21.7" width="3" height="16.5"/><rect x="525" y="23.0" width="3" height="13.9"/><rect x="530" y="23.8" width="3" height="12.4"/><rect x="535" y="21.1" width="3" height="17.7"/><rect x="540" y="21.0" width="3" height="18.1"/><rect x="545" y="19.5" width="3" height="21.1"/><rect x="550" y="16.9" width="3" height="26.3"/><rect x="555" y="18.3" width="3" height="23.5"/><rect x="560" y="19.3" width="3" height="21.5"/><rect x="565" y="18.7" width="3" height="22.7"/><rect x="570" y="18.4" width="3" height="23.3"/><rect x="575" y="22.3" width="3" height="15.5"/><rect x="580" y="17.3" width="3" height="25.4"/><rect x="585" y="18.2" width="3" height="23.6"/><rect x="590" y="17.8" width="3" height="24.4"/><rect x="595" y="18.3" width="3" height="23.3"/></svg>
-        <div class="ed-playhead"></div>
-        <div class="ed-ruler ticks"></div>
-      </div>
+        <div class="ak-manual hidden" id="ak-manual">
+          <label>Key <select id="ak-root"></select></label>
+          <label>Mode <select id="ak-mode"><option value="major">Major</option><option value="minor">Minor</option></select></label>
+          <label>BPM <input id="ak-bpm-in" type="number" min="20" max="400" step="0.1" placeholder="—" /></label>
+        </div>
 
-      <div class="ed-grid">
-        <section class="ed-card" aria-labelledby="ed-key-h">
-          <div class="ed-card-head"><h2 id="ed-key-h">Key finder</h2><span class="soon-tag">Soon</span></div>
-          <div class="ed-readout"><span class="ed-big">-- ---</span><span class="ed-small">Camelot --</span></div>
-          <p class="hint small">Detects the musical key (e.g. A minor · 8A) and how sure it is, for DJ mixing and harmonic matching.</p>
-          <button type="button" class="primary" disabled>Find key</button>
-        </section>
-        <section class="ed-card" aria-labelledby="ed-bpm-h">
-          <div class="ed-card-head"><h2 id="ed-bpm-h">BPM finder</h2><span class="soon-tag">Soon</span></div>
-          <div class="ed-readout"><span class="ed-big">---.-</span><span class="ed-small">BPM · beat grid --</span></div>
-          <p class="hint small">Detects the tempo and where the beats fall, and can write the BPM into the file's tags.</p>
-          <button type="button" class="primary" disabled>Find BPM</button>
-        </section>
-        <section class="ed-card ed-more" aria-labelledby="ed-more-h">
-          <div class="ed-card-head"><h2 id="ed-more-h">More coming soon</h2><span class="soon-tag">Soon</span></div>
-          <ul class="ed-list">
-            <li>Trim, fade in / out</li>
-            <li>Change pitch and tempo</li>
-            <li>Normalize loudness</li>
-            <li>Split vocals and instruments</li>
-            <li>Edit tags and cover art</li>
-          </ul>
-        </section>
+        <div class="ak-result" id="ak-result" aria-live="polite">
+          <div class="ak-bpm">
+            <span class="ak-num" id="ak-bpm">---</span><span class="ak-unit">BPM</span>
+            <span class="ak-x"><button type="button" id="ak-half" title="Half the tempo">/2</button><button type="button" id="ak-dbl" title="Double the tempo">X2</button></span>
+          </div>
+          <div class="ak-key">
+            <span class="ak-keyname" id="ak-key">-- -----</span>
+            <span class="ak-rel"><span id="ak-relname">—</span><button type="button" id="ak-swap" title="Switch to the relative major / minor" aria-label="Switch to the relative key">⇅</button></span>
+          </div>
+          <div class="ak-tune"><span id="ak-tune">A=440Hz</span><span class="ak-cam" id="ak-cam">Camelot --</span></div>
+        </div>
+        <div class="ak-status hint small" id="ak-status">Drop a song on “Use file”, or choose Manual.</div>
+
+        <div class="ak-tools">
+          <label>Scale <select id="ak-scale"></select></label>
+          <button type="button" class="ghost" id="ak-tap" title="Tap along to the beat (or press T)">Tap tempo</button>
+          <span class="ak-tools-right">
+            <button type="button" class="ghost" id="ak-copy">Copy</button>
+            <button type="button" class="primary" id="ak-tags" disabled title="Write the BPM and key into the file's tags (MP3, FLAC, Ogg, Opus)">Write to tags</button>
+          </span>
+        </div>
+        <div class="ak-piano" id="ak-piano" role="group" aria-label="Piano: the scale's notes are lit"></div>
+      </details>
+      <details class="ed-tool ms" id="tool-master">
+        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Mastering</span><span class="ak-sub">Stereo → Spectral → EQ → Clipper</span></summary>
+        <div class="ms-top">
+          <button type="button" class="ms-src" id="ms-src" title="Choose a song to master (or drop one here)">
+            <svg viewBox="0 0 48 56" aria-hidden="true"><path d="M6 2h24l12 12v40H6z" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M30 2v12h12" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M13 36v-6M18 40v-14M23 42v-18M28 38v-10M33 35v-4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+            <span class="ms-src-name" id="ms-name">Drop a song here, or click</span>
+          </button>
+          <div class="ms-transport">
+            <div class="ms-row">
+              <button type="button" class="ms-play" id="ms-play" disabled aria-label="Play">▶</button>
+              <span class="ms-time" id="ms-time">0:00</span>
+              <input type="range" class="cp-range ms-seek" id="ms-seek" min="0" max="1000" value="0" disabled aria-label="Position" />
+              <span class="ms-time" id="ms-dur">0:00</span>
+              <span class="ms-vol" title="Listening volume (doesn't change the export or the meters)"><span aria-hidden="true">Vol</span><input type="range" class="cp-range" id="ms-vol" min="0" max="100" value="80" aria-label="Listening volume" /></span>
+            </div>
+            <div class="ms-row ms-meters">
+              <button type="button" class="ghost ms-ab" id="ms-ab" title="Hear the song without the chain (B), or with it (A)" aria-pressed="false">A/B · Chain</button>
+              <div class="ms-mgrp" title="Output peak, left and right">
+                <span class="ms-mlab">Out</span>
+                <span class="ms-meter"><span>L</span><i><b id="ms-out-l"></b></i><em id="ms-out-lv">-∞</em></span>
+                <span class="ms-meter"><span>R</span><i><b id="ms-out-r"></b></i><em id="ms-out-rv">-∞</em></span>
+              </div>
+              <div class="ms-mgrp clip" title="How many dB the clipper is taking off, left and right">
+                <span class="ms-mlab">Clip</span>
+                <span class="ms-meter"><span>L</span><i><b id="ms-clip-l"></b></i><em id="ms-clip-lv">0.0</em></span>
+                <span class="ms-meter"><span>R</span><i><b id="ms-clip-r"></b></i><em id="ms-clip-rv">0.0</em></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="ms-viz" id="ms-viz">
+          <div class="ms-vz vz-lis">
+            <div class="ms-scope-head"><span>Lissajous</span><span class="ms-corr-lab">Corr <em id="ms-corr">+0.00</em></span></div>
+            <div class="crt"><canvas id="vz-lis" aria-label="Lissajous: the stereo image (up is mono, the diagonals are left and right)"></canvas></div>
+            <div class="ms-corr" title="Correlation: +1 mono, 0 wide, below 0 out of phase (trouble in mono)"><i><b id="ms-corr-bar"></b></i><span>-1</span><span>0</span><span>+1</span></div>
+          </div>
+          <div class="ms-vz vz-osc">
+            <div class="ms-scope-head"><span>Oscilloscope</span><span class="ms-corr-lab"><em id="vz-pitch">—</em></span></div>
+            <div class="crt"><canvas id="vz-osc" aria-label="Oscilloscope, following the pitch"></canvas></div>
+          </div>
+          <div class="ms-vz vz-loud">
+            <div class="ms-scope-head"><span>Loudness</span><button type="button" class="vz-btn" id="vz-reset" title="Start the integrated loudness and peak again">Reset</button></div>
+            <div class="crt"><canvas id="vz-vu" aria-label="VU meters, left and right"></canvas></div>
+            <div class="vz-lufs">
+              <div class="vz-l big"><span>Momentary</span><em id="vz-m">—</em><small>LUFS</small></div>
+              <div class="vz-lbar"><b id="vz-m-bar"></b></div>
+              <div class="vz-l"><span>Short-term</span><em id="vz-s">—</em></div>
+              <div class="vz-l"><span>Integrated</span><em id="vz-i">—</em></div>
+              <div class="vz-l"><span>Peak</span><em id="vz-peak">—</em></div>
+            </div>
+          </div>
+          <div class="ms-vz vz-fft">
+            <div class="ms-scope-head"><span>Spectrum</span><span class="vz-read" id="vz-read"></span>
+              <span class="ms-sa-key"><i class="mid"></i><span id="vz-key-a">Mid</span> <i class="side"></i><span id="vz-key-b">Side</span>
+                <span class="vz-modes"><button type="button" class="vz-btn on" data-m="ms" aria-pressed="true">M/S</button><button type="button" class="vz-btn" data-m="lr" aria-pressed="false">L/R</button></span></span></div>
+            <div class="crt"><canvas id="vz-fft" aria-label="Spectrum analyser with a spectrogram underneath; point at it for the frequency, level and note"></canvas></div>
+          </div>
+        </div>
+        <div class="ms-chain">
+          <section class="ms-fx" data-fx="stereo">
+            <div class="ms-fx-head"><span><b>01</b> Stereo</span><button type="button" class="ms-on" data-on="stereo" aria-pressed="true">On</button></div>
+            <div class="ms-fx-body" id="ms-stereo"></div>
+          </section>
+          <section class="ms-fx" data-fx="spectral">
+            <div class="ms-fx-head"><span><b>02</b> Spectral compressor</span><button type="button" class="ms-on" data-on="spectral" aria-pressed="true">On</button></div>
+            <div class="ms-fx-body" id="ms-spectral"></div>
+          </section>
+          <section class="ms-fx ms-fx-eq" data-fx="eq">
+            <div class="ms-fx-head"><span><b>03</b> EQ</span><span class="ms-eq-tools"><button type="button" class="ghost" id="ms-eq-flat" title="Set every band back to 0 dB">Flat</button><button type="button" class="ms-on" data-on="eq" aria-pressed="true">On</button></span></div>
+            <div class="ms-fx-body">
+              <canvas class="ms-eq" id="ms-eq" height="190" aria-label="EQ: drag a point to change a band, scroll to change its width, double-click to turn it on or off"></canvas>
+              <div class="ms-eq-read hint small" id="ms-eq-read">Drag a point: left / right for the frequency, up / down for the gain. Scroll for the width (Q). Double-click turns a band on or off.</div>
+            </div>
+          </section>
+          <section class="ms-fx" data-fx="clip">
+            <div class="ms-fx-head"><span><b>04</b> Clipper</span><button type="button" class="ms-on" data-on="clip" aria-pressed="true">On</button></div>
+            <div class="ms-fx-body" id="ms-clipper"></div>
+          </section>
+        </div>
+        <div class="ms-foot">
+          <label class="ms-fmt">Save as <select id="ms-format"><option value="auto" title="MP3 stays MP3, WAV stays WAV, anything else becomes FLAC">Auto · like the song</option><option value="wav">WAV · 24-bit</option><option value="flac">FLAC · 24-bit</option><option value="mp3">MP3 · 320 kbps</option></select></label>
+          <button type="button" class="ghost" id="ms-reset" title="Back to the preset's settings">Reset</button>
+          <span class="ms-status hint small" id="ms-status"></span>
+          <button type="button" class="primary" id="ms-export" disabled>Export master</button>
+        </div>
+      </details>
+      <details class="ed-tool soon" id="tool-trim">
+        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Trim, fade in / out</span><span class="soon-tag">Soon</span></summary>
+        <p class="hint small ed-tool-body">Cut the start and end of a song and fade it in or out, without re-encoding where the format allows.</p>
+      </details>
+      <details class="ed-tool soon" id="tool-pitch">
+        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Change pitch and tempo</span><span class="soon-tag">Soon</span></summary>
+        <p class="hint small ed-tool-body">Shift a song to another key or speed it up and slow it down, each one on its own.</p>
+      </details>
+      <details class="ed-tool soon" id="tool-loud">
+        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Normalize loudness</span><span class="soon-tag">Soon</span></summary>
+        <p class="hint small ed-tool-body">Even out the volume of a song or a whole folder to a set loudness (LUFS).</p>
+      </details>
+      <details class="ed-tool soon" id="tool-stems">
+        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Split vocals and instruments</span><span class="soon-tag">Soon</span></summary>
+        <p class="hint small ed-tool-body">Separate a song into vocals and backing tracks.</p>
+      </details>
+      <details class="ed-tool soon" id="tool-tags">
+        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Edit tags and cover art</span><span class="soon-tag">Soon</span></summary>
+        <p class="hint small ed-tool-body">Change titles, artists, albums and cover art for one file or many.</p>
+      </details>
       </div>
     </section>
 
@@ -377,6 +562,12 @@
           <button type="button" class="seg" data-theme="light" role="radio">Light</button>
           <button type="button" class="seg" data-theme="dark" role="radio">Dark</button>
         </div>
+        <div class="st-accent">
+          <span class="st-accent-l">Accent colour</span>
+          <span class="st-swatches" id="st-swatches" role="radiogroup" aria-label="Accent colour"></span>
+          <label class="st-pick" title="Any colour"><input type="color" id="st-accent" aria-label="Pick any accent colour" /></label>
+          <button type="button" class="ghost small" id="st-accent-reset" title="Back to Nabbit red">Default</button>
+        </div>
         <label class="check"><input id="st-fx" type="checkbox" /> Cursor effects (tether lines)</label>
         <label class="check win-only" id="st-blur-row"><input id="st-blur" type="checkbox" /> Window blur (see-through background, Windows 11)</label>
       </div>
@@ -395,6 +586,7 @@
             <option value="high">High · best available</option>
           </select>
         </label>
+        <label class="check" title="Each song is downloaded whole to a temporary file, then played (deleted when the song changes). Off: it streams straight away"><input id="st-pd" type="checkbox" /> Download each song before it plays</label>
         <label>Keep up to
           <select id="st-scache">
             <option value="256">256 MB of music cached</option>
@@ -408,6 +600,24 @@
         <div class="row"><p class="hint small" id="st-scache-info">Cache: empty</p><button type="button" class="ghost" id="st-scache-clear">Clear cache</button></div>
       </div>
 
+      <div class="set-group" id="lf-group">
+        <h2>Last.fm</h2>
+        <p class="hint small">Sends what you play in Player mode to your Last.fm profile ("scrobbling"), with your own free Last.fm API account: <button type="button" class="linkish" id="lf-create">create one</button> (any name, no callback needed), then paste its API key and shared secret here.</p>
+        <p class="lf-status" id="lf-status">Not set up</p>
+        <div class="lf-keys">
+          <input type="text" id="lf-key" placeholder="API key" spellcheck="false" autocomplete="off" aria-label="Last.fm API key" />
+          <input type="password" id="lf-secret" placeholder="Shared secret" spellcheck="false" autocomplete="off" aria-label="Last.fm shared secret" />
+          <button type="button" class="ghost" id="lf-save">Save</button>
+        </div>
+        <div class="row lf-acts">
+          <button type="button" class="ghost" id="lf-connect">Sign in to Last.fm</button>
+          <button type="button" class="ghost hidden" id="lf-cancel">Cancel</button>
+          <button type="button" class="ghost hidden" id="lf-out">Sign out</button>
+        </div>
+        <label class="check"><input id="lf-on" type="checkbox" /> Scrobble what I play</label>
+        <label class="check"><input id="lf-love" type="checkbox" /> Send ♥ as Last.fm loves</label>
+      </div>
+
       <div class="set-group">
         <h2>Downloads</h2>
         <label>Save downloads to</label>
@@ -418,6 +628,50 @@
         </div>
         <label class="check"><input id="st-ytm" type="checkbox" /> Check YouTube Music for a higher-quality copy of SoundCloud songs and albums</label>
         <p class="hint small">When you open a SoundCloud song or album, Nabbit looks for the same release on YouTube Music and tells you if its audio is better.</p>
+      </div>
+
+      <div class="set-group">
+        <h2>Soulseek</h2>
+        <p class="hint small">Search other people's shared music folders in the Music Downloader (choose <b>Soulseek</b> next to SoundCloud). Signing in with a new name and password creates the account. Only download music you have the right to.</p>
+        <div class="slsk-form">
+          <label>Username <input id="st-slsk-user" type="text" autocomplete="off" spellcheck="false" maxlength="30" /></label>
+          <label>Password <input id="st-slsk-pass" type="password" autocomplete="new-password" /></label>
+          <label>Listening port <input id="st-slsk-port" type="number" min="1024" max="65535" value="2234" /></label>
+        </div>
+        <div class="row"><p class="hint small" id="st-slsk-state">Not signed in.</p><button type="button" class="ghost" id="st-slsk-go">Sign in</button></div>
+        <p class="hint small">Nabbit doesn't share any of your files, and some users only send to people who share, so expect some downloads to be declined. Forwarding the listening port on your router lets more users reach you.</p>
+        <h3 class="set-sub">Search</h3>
+        <div class="slsk-form even">
+          <label>Prefer
+            <select id="st-slsk-pref">
+              <option value="flac">Lossless (FLAC)</option>
+              <option value="mp3">MP3</option>
+              <option value="any">No preference</option>
+            </select>
+          </label>
+          <label>Lowest bitrate (lossy)
+            <select id="st-slsk-minbr">
+              <option value="0">Any</option>
+              <option value="128">128 kbps</option>
+              <option value="192">192 kbps</option>
+              <option value="256">256 kbps</option>
+              <option value="320">320 kbps</option>
+            </select>
+          </label>
+          <label>If little matches
+            <select id="st-slsk-fb">
+              <option value="0">Stop there</option>
+              <option value="1">Also try the first artist</option>
+              <option value="2">Also try each artist</option>
+              <option value="3">…and no artist at all</option>
+            </select>
+          </label>
+        </div>
+        <label class="check"><input id="st-slsk-hires" type="checkbox" /> Prefer hi-res (24-bit, 96 kHz and up) among lossless copies</label>
+        <label class="check"><input id="st-slsk-strict" type="checkbox" /> Exact match: only files whose path has the artist and the title or album</label>
+        <label>Never download from (one username per line)
+          <textarea id="st-slsk-ban" rows="3" spellcheck="false"></textarea>
+        </label>
       </div>
 
       <div class="set-group">
@@ -439,61 +693,63 @@
     </section>
     </div>
 
-    <!-- Music player (player.js): streams with a cache; synced lyrics slide up above it -->
-    <section id="player" class="player hidden" aria-label="Music player">
-      <div id="pl-lyrics" class="pl-lyrics hidden">
-        <div class="pl-lyrics-head"><span>■ Lyrics</span><span id="pl-lyr-note" class="pl-lyr-note"></span></div>
-        <ol id="pl-lines" class="pl-lines"></ol>
+    <!-- Player mode (player-mode.js): your music library grouped by album, now playing, play bar -->
+    <div class="lp" id="lp" aria-label="Music library">
+      <div class="lp-row">
+        <div class="lp-main">
+          <div class="lp-head">
+            <span class="lp-title" id="lp-title">All music</span>
+            <span class="lp-stats" id="lp-stats"></span>
+            <span class="lp-sp"></span>
+            <span class="lp-scan hidden" id="lp-scan"></span>
+            <button type="button" class="lp-txt" id="lp-playall">Play all</button>
+            <button type="button" class="lp-txt dim" id="lp-shuffleall">Shuffle</button>
+            <button type="button" class="lp-txt dim" id="lp-sort" title="Group by album, or follow your folders">Sort: Album</button>
+          </div>
+          <div class="lp-cols" aria-hidden="true"><span>Artwork</span><span>Album</span><span>#</span><span>Title</span><span>Artist</span><span>Rating</span><span>Time</span></div>
+          <div class="lp-list" id="lp-list" tabindex="-1"></div>
+        </div>
+        <aside class="lp-now" id="lp-now" aria-label="Now playing">
+          <!-- The loop: behind the top of the panel, down to the bottom of the cover's spot -->
+          <div class="lp-loopbg" aria-hidden="true"><video id="lp-loop" class="lp-loop" playsinline muted loop disablepictureinpicture></video></div>
+          <div class="lp-speed">
+            <label class="lp-speed-on"><input type="checkbox" id="lp-speed-on" /> Speed <em id="lp-speed-v">100%</em></label>
+            <input type="range" id="lp-speed" min="-50" max="300" step="0.1" value="0" aria-label="Playback speed (scroll: one semitone)" title="Scroll for one semitone (100 cents) up or down; double-click for 100%" />
+            <div class="lp-ends"><span>-50%</span><span>300%</span></div>
+          </div>
+          <div class="lp-next-name" id="lp-next-name"></div>
+          <div class="lp-now-body">
+            <div class="lp-cover" id="lp-cover"><span id="lp-cover-t"></span>
+              <video id="lp-video" class="lp-video lp-media" playsinline></video>
+              <video id="lp-video-b" class="lp-video lp-media" playsinline></video>
+              <video id="lp-ytv" class="lp-video lp-ytv" playsinline muted></video>
+              <div class="lp-ytinfo hidden" id="lp-ytinfo"><span id="lp-yt-t"></span><span class="lp-yt-aud" role="radiogroup" aria-label="Audio"><button type="button" data-ytaud="local" role="radio" title="Your file plays; the video follows it, muted">Local</button><button type="button" data-ytaud="youtube" role="radio" title="The video plays with its own sound">YouTube</button></span><button type="button" id="lp-yt-next" title="Wrong video: try the next YouTube result">Not this one</button></div>
+              <button type="button" class="lp-vtoggle hidden" id="lp-vtoggle" aria-pressed="false" title="Show the music video instead of the cover">Switch to video</button>
+            </div>
+            <div class="lp-np-head"><div class="lp-np-thumb" id="lp-np-thumb" aria-hidden="true"></div><div class="lp-np-tt">
+              <div class="lp-np-title" id="lp-np-title">Nothing playing</div>
+              <div class="lp-np-artist" id="lp-np-artist">Double-click a song to play it.</div>
+            </div></div>
+            <div class="lp-np-rate"><button type="button" class="lp-heart" id="lp-np-heart" aria-label="Love this song" aria-pressed="false">♥</button><span class="lp-stars" id="lp-np-stars"></span></div>
+            <div class="lp-np-fmt" id="lp-np-fmt"></div>
+            <div class="lp-lyr-head"><span>Lyrics</span><span id="lp-lyr-src"></span></div>
+            <div class="lp-lyrics" id="lp-lyrics"></div>
+          </div>
+          <!-- Up next: a bar at the bottom of the panel; click it for the whole queue in a pop-up -->
+          <div class="lp-un" id="lp-un">
+            <div class="lp-un-pop hidden" id="lp-un-pop" role="dialog" aria-label="Up next"><div class="lp-un-head"><b>Up next</b><span id="lp-un-count"></span><button type="button" class="lib-mini" id="lp-un-save" title="Your own songs in the queue, as a new playlist">Save as playlist</button></div><ol class="lp-upnext" id="lp-upnext"></ol></div>
+            <button type="button" class="lp-un-btn" id="lp-un-btn" aria-expanded="false" aria-controls="lp-un-pop" title="The queue"><span class="k">Next</span><span class="t" id="lp-un-next">—</span><span class="c" id="lp-un-n"></span><span class="chev" aria-hidden="true">▴</span></button>
+          </div>
+        </aside>
       </div>
-      <div class="pl-row">
-        <div class="pl-art"><img id="pl-art" alt="" /></div>
-        <div class="pl-meta">
-          <button type="button" id="pl-title" class="link-btn pl-title" title="Open this song"></button>
-          <div id="pl-sub" class="pl-sub"></div>
-          <div id="pl-line" class="pl-line"></div>
-        </div>
-        <div class="pl-ctrl">
-          <button type="button" id="pl-prev" class="pl-btn" aria-label="Previous" title="Previous">
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 2.5v11M13 2.5 5.5 8 13 13.5z" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
-          <button type="button" id="pl-play" class="pl-btn pl-main" aria-label="Play" title="Play / pause">
-            <svg class="i-play" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 2.5v11L13 8z" fill="currentColor"/></svg>
-            <svg class="i-pause" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg></button>
-          <button type="button" id="pl-next" class="pl-btn" aria-label="Next" title="Next">
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13 2.5v11M3 2.5 10.5 8 3 13.5z" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
-        </div>
-        <div class="pl-tools">
-          <span class="pl-eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-          <button type="button" id="pl-lyr" class="pl-tool" aria-pressed="false" title="Synced lyrics">LYRICS</button>
-          <select id="pl-q" title="Streaming quality (cached as you listen)">
-            <option value="low">Low · ~64k</option>
-            <option value="normal">Normal · ~128k</option>
-            <option value="high">High · best</option>
-          </select>
-          <span class="pl-vol">
-            <button type="button" id="pl-mute" class="pl-btn" aria-label="Mute" title="Mute">
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z" fill="currentColor"/><path class="i-wave" d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path class="i-x" d="M11 6l4 4m0-4-4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
-            <input id="pl-volume" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="Volume" />
-          </span>
-          <button type="button" id="pl-close" class="pl-btn xbtn" aria-label="Close player" title="Stop and close">✕</button>
-        </div>
-      </div>
-      <div class="pl-prog">
-        <span id="pl-cur" class="pl-time">0:00</span>
-        <div id="pl-bar" class="pl-bar" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-          <div class="pl-track"><div id="pl-buf" class="pl-buf"></div><div id="pl-fill" class="pl-fill"></div></div>
-          <div id="pl-knob" class="pl-knob"></div>
-        </div>
-        <span id="pl-dur" class="pl-time">0:00</span>
-        <span id="pl-state" class="pl-state"></span>
-      </div>
-    </section>
+    </div>
 
     <!-- Downloader action bar, docked at the bottom of the window once a video is found -->
     <div id="dl-bar" class="bottom-bar hidden">
       <!-- Music extras (single songs and albums) -->
       <div id="mu-extras" class="bar-extras hidden">
         <label class="check" title="The album cover, saved inside each file"><input type="checkbox" id="mu-cover-on" checked /> Embed cover art</label>
-        <label class="check" title="Time-synced lyrics from LRCLIB, saved as an .lrc file and in the tags"><input type="checkbox" id="mu-lyrics-on" checked /> Synced lyrics
+        <label class="check" title="Time-synced lyrics from LRCLIB, embedded in the audio file"><input type="checkbox" id="mu-lyrics-on" checked /> Synced lyrics
           <span class="hint small">from <button type="button" class="link-btn" id="mu-lrclib">LRCLIB</button></span></label>
       </div>
       <div class="bar-inner">
@@ -519,18 +775,67 @@
     </div>
   </main>
 
+  <!-- The play bar (player-mode.js): one player for your library and for songs played from the Music Downloader -->
+  <div class="lp-bar hidden" id="lp-bar">
+    <div class="lp-bar-art" id="lp-bar-art"></div>
+    <div class="lp-bar-meta"><b id="lp-bar-title">—</b><span id="lp-bar-artist"></span><span class="lp-np-rate"><button type="button" class="lp-heart" id="lp-bar-heart" aria-label="Love this song" aria-pressed="false">♥</button><span class="lp-stars" id="lp-bar-stars"></span></span><span class="lp-bar-state" id="lp-bar-state"></span></div>
+    <canvas class="lp-osc" id="lp-osc" aria-hidden="true" title="Oscilloscope: what you're hearing"></canvas>
+    <div class="lp-bar-mid">
+      <div class="lp-transport">
+        <button type="button" class="lp-ico" id="lp-repeat" aria-label="Repeat: off" aria-pressed="false" title="Repeat: off"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3l3 3-3 3M4 11V9a3 3 0 0 1 3-3h13M7 21l-3-3 3-3M20 13v2a3 3 0 0 1-3 3H4"/><path class="i-one" d="M11.2 10.2l1.3-.9v5.4"/></svg></button>
+        <button type="button" class="lp-ico" id="lp-prev" aria-label="Previous" title="Previous"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6l-8 6 8 6zM6 6v12"/></svg></button>
+        <button type="button" class="lp-ico big" id="lp-play" aria-label="Play" title="Play (Space)"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M7 4.5l12 7.5-12 7.5z"/><path class="i-pause" d="M8 5v14M16 5v14"/></svg></button>
+        <button type="button" class="lp-ico" id="lp-next" aria-label="Next" title="Next"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l8 6-8 6zM18 6v12"/></svg></button>
+        <button type="button" class="lp-ico" id="lp-shuffle" aria-label="Shuffle" aria-pressed="false" title="Shuffle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3c5 0 5 10 10 10h3M17 14l3 3-3 3M4 17h3c1.5 0 2.5-.9 3.3-2M13.7 9c.8-1.1 1.8-2 3.3-2h3M17 4l3 3-3 3"/></svg></button>
+      </div>
+      <div class="lp-time"><span id="lp-t0">0:00</span><span class="lp-wave"><canvas id="lp-wave" aria-hidden="true"></canvas><input type="range" id="lp-seek" min="0" max="1000" value="0" aria-label="Position" /></span><span id="lp-t1">0:00</span></div>
+    </div>
+    <div class="lp-bar-right">
+      <button type="button" class="lp-ico" id="lp-fx" aria-label="Effects" title="Effects" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M12 4v16M19 4v16"/><path d="M3 15h4M10 8h4M17 12h4"/></svg></button>
+      <button type="button" class="lp-ico" id="lp-mute" aria-label="Mute" title="Mute"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path class="i-wave" d="M16 9a4 4 0 0 1 0 6"/><path class="i-x" d="M16 10l4 4M20 10l-4 4"/></svg></button>
+      <span class="lp-volwrap" title="Volume · the bars show the output level, left and right (red: clipping)"><canvas id="lp-vmeter" aria-hidden="true"></canvas><input type="range" id="lp-vol" min="0" max="100" value="80" aria-label="Volume" /></span>
+      <button type="button" class="lp-ico lp-close" id="lp-close" aria-label="Stop and close" title="Stop and close the player"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+  </div>
+
+  <!-- Recent downloads: what's running now, and the files made lately (drag one out of the window) -->
+  <aside class="recent" id="recent" aria-label="Recent downloads">
+    <div class="rc-head"><span>■ Recent downloads</span><button type="button" class="vz-btn" id="rc-folder" title="Open the download folder">Open folder</button></div>
+    <div class="rc-sec" id="rc-now-h"><span>Now</span><span><button type="button" id="jobs-clear" class="link-btn hidden" title="Remove finished jobs from this list">Clear</button></span></div>
+    <div id="jobs" class="rc-now"><p class="empty">Nothing running.</p></div>
+    <div class="rc-sec"><span>Done</span><span><button type="button" class="link-btn" id="rc-clear" title="Empty this list (the files stay)">Clear</button></span></div>
+    <input type="text" class="rc-filter" id="rc-filter" placeholder="Filter…" aria-label="Filter recent downloads" />
+    <ol class="rc-list" id="rc-list"></ol>
+  </aside>
+  <div class="rc-menu hidden" id="rc-menu" role="menu"></div>
+
+  <script src="ranges.js"></script>
   <script src="../downloader/formats.js"></script>
   <script src="../compressor.js"></script>
   <canvas id="fx" aria-hidden="true"></canvas>
   <div id="gbar" aria-hidden="true"></div>
-  <script src="demo-data.js"></script>
+  <script src="../slsk-search.js"></script>
+<script src="../slsk-inputs.js"></script>
+<script src="demo-data.js"></script>
 <script src="demo.js"></script>
 <script src="renderer.js"></script>
   <script src="fx.js"></script>
   <script src="tips.js"></script>
-  <script src="player.js"></script>
   <script src="scrub.js"></script>
   <script src="trim.js"></script>
+  <script src="../analyzer.js"></script>
+  <script src="editor.js"></script>
+  <script src="../mastering.js"></script>
+  <script src="../player-core.js"></script>
+  <script src="eq-editor.js"></script>
+  <script src="visualizers.js"></script>
+  <script src="master.js"></script>
+  <script src="recent.js"></script>
+  <script src="batch.js"></script>
+  <script src="../library.js"></script>
+  <script src="player-mode.js"></script>
+  <script src="player-fx.js"></script>
+  <script src="lastfm-ui.js"></script>
   <script src="compress.js"></script>
   <script src="selects.js"></script>
 </body>
