@@ -10,7 +10,7 @@
   const st = {
     file: null, info: null, kfs: [], peaks: null,
     segs: [], sel: 0, zoom: 0,
-    cut: 'keyframe', keep: true, merge: true,
+    cut: 'exact', keep: true, merge: true,
     tracks: new Set(), previewing: false, loadSeq: 0,
   };
   const dur = () => (st.info && st.info.duration) || video.duration || 0;

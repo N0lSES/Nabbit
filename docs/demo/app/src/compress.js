@@ -169,6 +169,11 @@
       x.setAttribute('aria-label', `Remove ${it.name}`);
       x.disabled = it.state === 'running';
       x.onclick = () => { items.splice(i, 1); if (sel >= items.length) sel = Math.max(0, items.length - 1); render(); };
+      // Video and audio: ▶ plays the result once there is one (else the original) in the player.
+      const media = (it.kind === 'video' || it.kind === 'audio');
+      const file = it.state === 'done' && it.outPath ? it.outPath : it.path;
+      if (!media || typeof filePlayButton !== 'function') { const sp = document.createElement('span'); sp.className = 'fp-spacer'; li.prepend(sp); }
+      else li.prepend(filePlayButton(() => items.filter((x) => x.kind === 'video' || x.kind === 'audio').map((x) => (x.state === 'done' && x.outPath ? x.outPath : x.path)), file));
       li.append(b, x);
       list.append(li);
     });

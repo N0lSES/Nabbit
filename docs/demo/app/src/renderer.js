@@ -285,6 +285,7 @@ function renderFiles() {
     rm.textContent = '×';
     rm.title = 'Remove';
     rm.onclick = () => { cvFiles.splice(i, 1); renderFiles(); };
+    if (canPlayFile(p)) li.append(filePlayButton(() => cvFiles, p));
     li.append(name, rm);
     ul.append(li);
   });
@@ -562,10 +563,12 @@ $('dl-play').onclick = () => {
 };
 // Music asks where to save (starting in the folder used last time); videos use the folder in the bar.
 async function pickMusicFolder(kind) {
+  // Starts in the folder you saved music to last, else Music\Nabbit\Music (or your download folder).
   let last = '';
-  try { last = localStorage.getItem('muAlbumDir') || ''; } catch {}
-  const dir = await window.api.pickFolder({ title: `Save ${kind} to`, defaultPath: last || $('dl-out').value });
-  if (dir) try { localStorage.setItem('muAlbumDir', dir); } catch {}
+  try { last = localStorage.getItem('muDir') || ''; } catch {}
+  const start = last || (await window.api.musicFolder().catch(() => '')) || $('dl-out').value;
+  const dir = await window.api.pickFolder({ title: `Save ${kind} to`, defaultPath: start });
+  if (dir) try { localStorage.setItem('muDir', dir); } catch {}
   return dir;
 }
 $('dl-go').onclick = async () => {
@@ -1048,6 +1051,35 @@ const PLAY_SVG = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="t
 const playItem = (r) => ({ url: r.url, title: r.title, artist: r.artist, artistLinks: r.artistLinks || [], album: r.album || null,
   albumUrl: r.albumUrl || null, thumbnail: r.thumbnail || null, duration: r.duration || null });
 // ▶ button (optionally showing a track number until hovered).
+// ---------- Playing your files from the Toolbox's lists (Recent, converter, compressor, stems) ----------
+// Through the player and its play bar. A list's ▶ plays that file and then the list's other files.
+const MEDIA_EXT = ['mp3', 'flac', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'wav', 'webm', 'mp4', 'm4v', 'mkv', 'mov'];
+function canPlayFile(p) { return typeof p === 'string' && MEDIA_EXT.includes((p.split('.').pop() || '').toLowerCase()); }
+const samePath = (a, b) => !!a && !!b && a.replace(/\//g, '\\').toLowerCase() === b.replace(/\//g, '\\').toLowerCase();
+let nowFile = { path: null, playing: false };
+function paintFilePlay(b) {
+  const on = samePath(nowFile.path, b.dataset.playPath);
+  b.classList.toggle('now', on);
+  b.classList.toggle('now-playing', on && nowFile.playing);
+  b.title = on ? (nowFile.playing ? 'Pause' : 'Resume') : b.dataset.label;
+}
+document.addEventListener('nabbit-now', (e) => { nowFile = e.detail || { path: null, playing: false }; for (const b of document.querySelectorAll('.file-play')) paintFilePlay(b); });
+// getPaths() → the list's files (playable ones only are kept); i: this one. num: shown until hovered.
+function filePlayButton(getPaths, path, { num = null, label = null } = {}) {
+  const b = playButton(async () => {
+    if (window.Player && samePath(window.Player.nowPath, path)) { document.getElementById('lp-play').click(); return; }
+    const paths = getPaths().filter(canPlayFile);
+    let i = paths.findIndex((p) => samePath(p, path));
+    if (i < 0) { paths.unshift(path); i = 0; }
+    if (!(window.Player && (await window.Player.playFiles(paths, i)))) { b.classList.add('cant'); b.title = "This file can't be played"; }
+  }, label || `Play ${path.split(/[\\/]/).pop()}`, num);
+  b.classList.add('file-play');
+  b.dataset.playPath = path;
+  b.dataset.label = b.title;
+  paintFilePlay(b);
+  return b;
+}
+
 function playButton(onPlay, label, num = null, warmUrl = null) {
   const b = document.createElement('button');
   b.type = 'button';
@@ -1143,6 +1175,17 @@ document.querySelectorAll('#mu-provider .seg').forEach((b) => b.addEventListener
   if (q && !/^https?:\/\//i.test(q)) musicSearch(q);
 }));
 
+// "Search on Soulseek" (right-click menus, src/file-actions.js): the Music Downloader, on Soulseek,
+// searching for songs with these words.
+window.nabbitSlskSearch = (query) => {
+  const tab = document.querySelector('.tab[data-mode="music"]');
+  if (tab && !tab.classList.contains('active')) tab.click();
+  if (PROVIDERS.soulseek && muProvider !== 'soulseek') setProvider('soulseek');
+  const songs = document.querySelector('#mu-types .chip[data-type="songs"]');
+  if (songs && muType !== 'songs') { muType = 'songs'; document.querySelectorAll('#mu-types .chip[data-type]').forEach((c) => { c.classList.toggle('active', c === songs); c.setAttribute('aria-checked', String(c === songs)); }); }
+  $('dl-url').value = query;
+  musicSearch(query);
+};
 async function musicSearch(query) {
   if (muProvider === 'soulseek') return slskSearch(query);
   const seq = ++dlSearchSeq;
@@ -1164,19 +1207,20 @@ async function musicSearch(query) {
     if (seq === dlSearchSeq) $('dl-search').disabled = false;
   }
 }
-async function drmFallback(seq, url, hint) {
+async function drmFallback(seq, url, hint, why = 'drm') {
+  const what = why === 'drm' ? "SoundCloud's copy is DRM-protected" : "SoundCloud won't give this track out here (blocked in your country, private or removed)";
   // Title and artist from the search row, else from the link (soundcloud.com/<artist>/<track-name>).
   const slug = /soundcloud\.com\/([^/?#]+)\/([^/?#]+)/i.exec(url);
   const words = (x) => decodeURIComponent(x || '').replace(/[-_]+/g, ' ').trim();
   const want = { kind: 'track', title: (hint && hint.title) || (slug && words(slug[2])), artist: (hint && hint.artist) || (slug && words(slug[1])), duration: hint && hint.duration };
-  dlState('loading', "SoundCloud's copy is DRM-protected. Looking for it on YouTube Music…");
+  dlState('loading', `${what}. Looking for it on YouTube Music…`);
   const row = await window.api.musicFindYtm(want).catch(() => null);
   if (seq !== dlSearchSeq) return;
-  if (!row) return dlState('error', "SoundCloud's copy is DRM-protected (SoundCloud Go+ only), and it isn't on YouTube Music.");
+  if (!row) return dlState('error', why === 'drm' ? "SoundCloud's copy is DRM-protected (SoundCloud Go+ only), and it isn't on YouTube Music." : `${what}, and it isn't on YouTube Music.`);
   await musicOpen(row.url, row, muFromResults);
   // Say why this is a YouTube Music song (unless something else was opened meanwhile).
   if (dlInfo && dlInfo.webpageUrl && !/soundcloud\.com/i.test(dlInfo.webpageUrl) && $('dl-state').classList.contains('hidden')) {
-    dlState('note', "SoundCloud's copy is DRM-protected, so this is the same song from YouTube Music.");
+    dlState('note', `${what}, so this is the same song from YouTube Music.`);
   }
 }
 
@@ -1331,7 +1375,11 @@ async function musicOpen(url, hint = null, fromResults = false) {
     if (seq !== dlSearchSeq) return;
     const msg = cleanMsg(e);
     // A DRM-protected SoundCloud track (SoundCloud Go+ only): open the same song from YouTube Music.
-    if (/\bDRM\b/i.test(msg) && /soundcloud\.com/i.test(url)) return drmFallback(seq, url, hint);
+    // Or one SoundCloud refuses here (403 / 404: blocked in this country, private or removed): the same.
+    if (/soundcloud\.com/i.test(url)) {
+      if (/\bDRM\b/i.test(msg)) return drmFallback(seq, url, hint);
+      if (/HTTP Error 40[34]|Forbidden|geo.?restrict|not available (in|from) your (country|location)/i.test(msg)) return drmFallback(seq, url, hint, 'blocked');
+    }
     dlState(msg === 'cancelled' ? null : 'error', msg === 'cancelled' ? null : msg);
   } finally {
     if (seq === dlSearchSeq) $('dl-search').disabled = false;
@@ -1581,9 +1629,13 @@ function renderAlbum(album, keep = null) {
 function albumQueue() {
   if (!muAlbum) return [];
   const picked = selectedTracks();
+  // Only a real album names the songs' album (and artist, cover); a playlist's or likes' name, owner and
+  // picture aren't the songs' own: those come from each song (filled in when it's looked up).
+  const al = muAlbum.isAlbum !== false;
   return muAlbum.entries.filter((t) => t.url && (!picked.length || picked.includes(t.index))).map((t) => playItem({
-    url: t.url, title: t.title, artist: t.artist || muAlbum.artist, artistLinks: muAlbum.artistLinks || [],
-    album: muAlbum.title, albumUrl: muAlbum.webpageUrl, thumbnail: muAlbum.thumbnail, duration: t.duration }));
+    url: t.url, title: t.title, artist: t.artist || (al ? muAlbum.artist : null), artistLinks: al ? muAlbum.artistLinks || [] : [],
+    album: al ? muAlbum.title : null, albumUrl: al ? muAlbum.webpageUrl : null,
+    thumbnail: al ? muAlbum.thumbnail || t.thumbnail : t.thumbnail || null, duration: t.duration }));
 }
 function playAlbum(fromIndex = null) {
   const q = albumQueue();
@@ -1808,6 +1860,7 @@ function showSettings(st) {
   $('st-min').checked = st.startMinimized;
   $('st-min').disabled = !st.startWithWindows;
   $('st-tray').checked = st.closeToTray;
+  $('st-mediakeys').checked = st.mediaKeys !== false;
   $('st-blur').checked = !!st.windowBlur;
   $('st-blur-row').classList.toggle('hidden', !st.blurSupported);
   document.documentElement.classList.toggle('blur', !!st.blurNow);
@@ -1817,6 +1870,8 @@ function showSettings(st) {
   $('st-ytm').checked = st.ytmCompare !== false;
   $('st-shell').checked = st.shellMenu;
   $('st-dir').value = st.downloadDir;
+  renderWhere(st);
+  renderDiscord(st);
   $('st-hw').value = st.hwAccel;
   $('st-sq').value = st.streamQuality || 'normal';
   $('st-pd').checked = st.playDownload !== false;
@@ -1847,6 +1902,7 @@ document.querySelector('[data-tool="settings"]').addEventListener('click', () =>
 $('st-login').onchange = (e) => saveSetting({ startWithWindows: e.target.checked }, e.target);
 $('st-min').onchange = (e) => saveSetting({ startMinimized: e.target.checked }, e.target);
 $('st-tray').onchange = (e) => saveSetting({ closeToTray: e.target.checked }, e.target);
+$('st-mediakeys').onchange = (e) => saveSetting({ mediaKeys: e.target.checked }, e.target);
 // Own caption buttons (glass window): minimize, fill the screen / back, close. Double-clicking the
 // title bar also fills the screen / goes back.
 const showFilled = (st) => document.documentElement.classList.toggle('filled', !!(st && st.filled));
@@ -1876,6 +1932,66 @@ document.querySelectorAll('#st-theme .seg').forEach((b) => b.addEventListener('c
   if (!b.classList.contains('active') && window.nabbitGlitch) window.nabbitGlitch();
   saveSetting({ theme: b.dataset.theme });
 }));
+// Settings → Where results go: Nabbit's folders (Music, Videos, Documents → Nabbit) or next to the original.
+async function renderWhere(st) {
+  const layout = st.saveLayout === 'beside' ? 'beside' : 'nabbit';
+  window.nabbitSaveLayout = layout;
+  if (window.StemsUI && window.StemsUI.refreshDest) window.StemsUI.refreshDest();
+  for (const b of document.querySelectorAll('#st-layout .seg')) { const on = b.dataset.layout === layout; b.classList.toggle('active', on); b.setAttribute('aria-checked', String(on)); }
+  $('st-where').classList.toggle('beside', layout === 'beside');
+  $('st-layout-hint').textContent = layout === 'nabbit'
+    ? 'Songs go in Music → Nabbit, videos in Videos → Nabbit, everything else in Documents → Nabbit → Misc, each in a folder for what made it. Click one to open it.'
+    : 'Converted, trimmed, compressed and mastered files, stems and frames are saved next to the file they came from. Downloads still go to the folder below.';
+  const box = $('st-folders');
+  if (box.childElementCount) return;
+  let list = [];
+  try { list = await window.api.nabbitFolders(); } catch { /* none */ }
+  for (const group of ['Music', 'Videos', 'Documents']) {
+    const g = document.createElement('span'); g.className = 'g'; g.textContent = group;
+    const l = document.createElement('span'); l.className = 'l';
+    for (const f of list.filter((x) => x.group === group)) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = f.label; b.title = f.dir;
+      b.addEventListener('click', () => window.api.nabbitFolderOpen(f.dir));
+      l.append(b);
+    }
+    box.append(g, l);
+  }
+}
+document.querySelectorAll('#st-layout .seg').forEach((b) => b.addEventListener('click', () => saveSetting({ saveLayout: b.dataset.layout })));
+// Settings → Discord (main.js, discord-rpc.js).
+function renderDiscord(st) {
+  const seg = (id, v) => { for (const b of document.querySelectorAll(`#${id} .seg`)) { const on = b.dataset.v === v; b.classList.toggle('active', on); b.setAttribute('aria-checked', String(on)); } };
+  seg('dc-mode', st.discordMode);
+  seg('dc-pic', st.discordPicture);
+  const off = st.discordMode === 'off';
+  $('dc-group').classList.toggle('dc-off', off);
+  $('dc-album').checked = st.discordAlbum; $('dc-time').checked = st.discordTime; $('dc-play').checked = st.discordPlay;
+  if (document.activeElement !== $('dc-app')) $('dc-app').value = st.discordAppId || '';
+  $('dc-app-row').classList.toggle('hidden', !!st.discordBuiltIn && !st.discordAppId);
+  $('dc-status').textContent = off ? 'Off'
+    : !st.discordHasApp ? 'Paste your Discord application ID below (discord.com/developers → New Application → its Application ID).'
+      : st.discordConnected ? 'Connected to Discord' : 'Waiting for the Discord app (open it on this PC)';
+  $('dc-pic-hint').textContent = st.discordPicture === 'preset'
+    ? 'The ready-made Nabbit nearest his colour (no clothes).'
+    : st.discordExact ? 'Exactly as he looks (clothes and colour), from your Share address.'
+      : 'Exactly as he looks needs Share links on (below). Until then: the ready-made Nabbit nearest his colour.';
+  const cv = $('dc-preview'), mine = document.getElementById('nb-preview');
+  if (cv && mine && mine.width) {
+    const g = cv.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.fillStyle = '#141218'; g.fillRect(0, 0, cv.width, cv.height);
+    g.drawImage(mine, 4, 4, cv.width - 8, cv.height - 8);
+  }
+}
+document.querySelectorAll('#dc-mode .seg').forEach((b) => b.addEventListener('click', () => saveSetting({ discordMode: b.dataset.v })));
+document.querySelectorAll('#dc-pic .seg').forEach((b) => b.addEventListener('click', () => saveSetting({ discordPicture: b.dataset.v })));
+for (const [id, key] of [['dc-album', 'discordAlbum'], ['dc-time', 'discordTime'], ['dc-play', 'discordPlay']]) $(id).addEventListener('change', (e) => saveSetting({ [key]: e.target.checked }, e.target));
+$('dc-app').addEventListener('change', (e) => {
+  const v = e.target.value.trim();
+  if (v && !/^\d{15,25}$/.test(v)) { e.target.setCustomValidity('An application ID is 17 to 20 digits.'); e.target.reportValidity(); return; }
+  e.target.setCustomValidity('');
+  saveSetting({ discordAppId: v });
+});
 $('st-dir-pick').onclick = async () => {
   const p = await window.api.pickFolder();
   if (!p) return;
@@ -2493,4 +2609,25 @@ function drmNote(v) {
   const what = v.kind === 'track' ? 'song' : v.kind === 'album' ? 'album' : 'playlist';
   const part = v.total ? ` Found ${v.found} of ${v.total} songs.` : '';
   dlState('note', `${v.from} uses DRM, which Nabbit doesn't get around. This is the same ${what} from YouTube Music.${part}`);
+}
+
+// Scrolling on any slider moves it a step (Shift: 5 steps), like dragging it. Sliders that handle the
+// wheel themselves (the play bar, Speed, the EQ) keep their own way (they prevent the default).
+{
+  const changed = new Map(); // slider → timer for its 'change' (saved settings) after the scrolling stops
+  document.addEventListener('wheel', (e) => {
+    const r = e.target;
+    if (e.defaultPrevented || !(r instanceof HTMLInputElement) || r.type !== 'range' || r.disabled) return;
+    e.preventDefault();
+    const d = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+    if (!d) return;
+    const step = Number(r.step) > 0 ? Number(r.step) : 1;
+    const min = Number(r.min || 0), max = Number(r.max || 100);
+    const v = Math.max(min, Math.min(max, Number(r.value) + (d < 0 ? 1 : -1) * step * (e.shiftKey ? 5 : 1)));
+    if (v === Number(r.value)) return;
+    r.value = String(Math.round(v / step) * step);
+    r.dispatchEvent(new Event('input', { bubbles: true }));
+    clearTimeout(changed.get(r));
+    changed.set(r, setTimeout(() => { changed.delete(r); r.dispatchEvent(new Event('change', { bubbles: true })); }, 250));
+  }, { passive: false });
 }

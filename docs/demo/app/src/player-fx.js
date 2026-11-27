@@ -59,6 +59,7 @@
   // a second at 48 kHz rather than in big lumps.
   const BLOCK = 512;
   let ctx = null, src = null, node = null, out = null, analyser = null, starting = null, failed = '';
+  let beatAn = null, beatBuf = null, beatPrev = null; // the low end, unsmoothed, for Nabbit's dancing
   let meterL = null, meterR = null;
   let volume = (Number(($('lp-vol') || {}).value || 80) / 100) ** 2; // the play bar's volume (0 … 1, already curved)
   const stats = { sent: 0, back: 0, late: 0, peak: 0 }; // what's going through the plugins (shown in their section)
@@ -89,12 +90,20 @@ class NabbitFx extends AudioWorkletProcessor {
     const s = this.s;
     if (!s) return true;
     const n = L.length;
+    // A bad sample (NaN / infinity) would stick in the filters' memory for good: it's made silence.
+    for (let i = 0; i < n; i++) { if (!(L[i] > -1e9 && L[i] < 1e9)) L[i] = 0; if (!(R[i] > -1e9 && R[i] < 1e9)) R[i] = 0; }
     for (const k of s.order) {
       if (!s.on[k]) continue;
       if (k === 'stereo') M.stereoStage(L, R, n, s.stereo);
       else if (k === 'eq') this.eq.process([L, R], n);
       else if (k === 'master') this.master.process(L, R, n);
       else if (k === 'vst' && this.vst) this.hd.process(L, R, n, currentTime, this.send);
+    }
+    // And if the chain itself ever goes bad, it starts afresh instead of staying broken.
+    if (!Number.isFinite(L[0] + L[n - 1] + R[0] + R[n - 1])) {
+      L.fill(0); R.fill(0);
+      this.eq = new M.Eq(sampleRate, 2); if (s.eq) this.eq.set(s.eq);
+      this.master = new M.Chain(sampleRate, M.normalize(null));
     }
     if (this.vst && currentTime - this.stAt > 0.5) {
       this.stAt = currentTime;
@@ -105,6 +114,84 @@ class NabbitFx extends AudioWorkletProcessor {
   }
 }
 registerProcessor('nabbit-fx', NabbitFx);
+// DJ mode's pitch shifter, one per player (pitch.js): off, the sound passes straight through.
+class NabbitPitchNode extends AudioWorkletProcessor {
+  static get parameterDescriptors() { return [{ name: 'ratio', defaultValue: 1, minValue: 0.25, maxValue: 4, automationRate: 'k-rate' }]; }
+  constructor() {
+    super();
+    // The engines (pitch.js), made when first picked; one is used at a time. Their settings (formants,
+    // a chord's voices, the robot's note) apply to whichever is in use.
+    this.engines = {};
+    this.extra = { formantRatio: 1, voices: null, targets: null, robotHz: 130.81 };
+    this.ps = this.engine('pv');
+    this.port.onmessage = (e) => {
+      const m = e.data || {};
+      if (m.algo && self.NabbitPitch.ALGOS[m.algo]) { const next = this.engine(m.algo); if (next !== this.ps) { const was = this.ps.on; this.ps.setOn(false); this.ps = next; this.ps.setOn(was); } }
+      if (m.extra) { Object.assign(this.extra, m.extra); this.apply(); }
+      if ('on' in m) this.ps.setOn(m.on);
+    };
+  }
+  engine(a) { if (!this.engines[a]) { this.engines[a] = self.NabbitPitch.makeEngine(a, 2, sampleRate); } const e = this.engines[a]; this.ps = this.ps || e; this.apply(e); return e; }
+  apply(e = this.ps) { if (!e) return; e.formantRatio = this.extra.formantRatio; if ('voices' in e) e.voices = this.extra.voices; if ('targets' in e) e.targets = this.extra.targets; if ('robotHz' in e) e.robotHz = this.extra.robotHz; }
+  process(inputs, outputs, params) {
+    const inp = inputs[0], out = outputs[0];
+    if (!inp || !inp.length) { for (const o of out) o.fill(0); return true; }
+    this.ps.ratio = params.ratio[0];
+    // An engine that fails is replaced by a fresh one (silence for this block), never left dead.
+    try { this.ps.process(inp, out); } catch (err) {
+      for (const o of out) o.fill(0);
+      const name = Object.keys(this.engines).find((k) => this.engines[k] === this.ps) || 'pv', was = this.ps.on;
+      delete this.engines[name];
+      this.ps = this.engine(name);
+      this.ps.setOn(was);
+      this.port.postMessage({ error: String(err && err.message || err) });
+    }
+    for (const o of out) for (let i = 0; i < o.length; i++) if (!(o[i] > -1e9 && o[i] < 1e9)) { o[i] = 0; this.ps.reset(); }
+    return true;
+  }
+}
+registerProcessor('nabbit-pitch', NabbitPitchNode);
+// The time shaper, one per player (pitch.js): half-time / tripletize live; off, straight through.
+class NabbitTimeNode extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.ts = new self.NabbitPitch.TimeShaper(2, sampleRate);
+    this.port.onmessage = (e) => {
+      const m = e.data || {};
+      if (m.reset) this.ts.reset();
+      if (m.grid) { delete this.ts.grid.from; delete this.ts.grid.once; Object.assign(this.ts.grid, m.grid); }
+      if ('shape' in m) this.ts.setShape(m.shape || null);
+      if (m.clock) { this.ts.setClock(m.clock.song, m.clock.frame, m.clock.rate); if (this.sl) this.sl.setClock(m.clock.song, m.clock.frame, m.clock.rate, m.clock.playing); }
+      // Live slice stretch / slice map: the song's audio (once), then its slices; null for off.
+      if (m.pcm) { if (!this.sl) this.sl = new self.NabbitPitch.Slicer(sampleRate); this.sl.setPcm(m.pcm); }
+      if (m.slices && this.sl) this.sl.setSlices(m.slices.cuts, m.slices.mode);
+      if ('slices' in m) this.slOn = !!m.slices;
+      if (m.drop) { this.sl = null; this.slOn = false; }
+    };
+  }
+  process(inputs, outputs) {
+    const inp = inputs[0], out = outputs[0];
+    // Slicing: its own copy of the song, played on the player's clock (what comes in isn't used), then
+    // the time shaper on that when it's on (DJ mode's transition effects).
+    if (this.slOn && this.sl) {
+      const N = out[0].length;
+      if (!this.tmp || this.tmp[0].length !== N) this.tmp = [new Float32Array(N), new Float32Array(N)];
+      try {
+        this.sl.process(inp, this.tmp, currentFrame);
+        try { this.ts.process(this.tmp, out, currentFrame); } catch { for (let c = 0; c < out.length; c++) out[c].set(this.tmp[c] || this.tmp[0]); }
+      } catch (err) { for (const o of out) o.fill(0); const pcm = this.sl.pcm, { cuts, mode, clock } = this.sl; this.sl = new self.NabbitPitch.Slicer(sampleRate); this.sl.setPcm(pcm); this.sl.setSlices(cuts.slice(1), mode); this.sl.setClock(clock.song, clock.frame, clock.rate, clock.playing); }
+      return true;
+    }
+    if (!inp || !inp.length) { for (const o of out) o.fill(0); return true; }
+    try { this.ts.process(inp, out, currentFrame); } catch (err) { // off: the sound straight through (still kept, for when it's turned on)
+      for (let c = 0; c < out.length; c++) out[c].set(inp[c] || inp[0]);
+      const { shape, grid } = this.ts;
+      this.ts = new self.NabbitPitch.TimeShaper(2, sampleRate); Object.assign(this.ts.grid, grid); this.ts.setShape(shape);
+    }
+    return true;
+  }
+}
+registerProcessor('nabbit-time', NabbitTimeNode);
 `;
   function ensureAudio() {
     if (ctx || starting) return starting;
@@ -119,12 +206,30 @@ registerProcessor('nabbit-fx', NabbitFx);
         node.port.onmessage = onWorklet;
         // Both players feed the chain (only the one playing makes a sound).
         src = c.createGain();
-        for (const m of mediaEls) c.createMediaElementSource(m).connect(src);
+        // Each with its own level, for DJ mode's crossfades.
+        // player → its pitch shifter (DJ key shifts; off: straight through) → its level → the chain.
+        for (const m of mediaEls) {
+          const g = c.createGain();
+          let ps = null;
+          try { ps = new AudioWorkletNode(c, 'nabbit-pitch', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2], channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers' }); } catch { ps = null; }
+          const s0 = c.createMediaElementSource(m);
+          // player → its time shaper (off: straight through) → its pitch shifter → its level → the chain.
+          let tn = null;
+          try { tn = new AudioWorkletNode(c, 'nabbit-time', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2], channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers' }); } catch { tn = null; }
+          if (tn) { elTime.set(m, { node: tn, on: false }); s0.connect(tn); }
+          const head = tn || s0;
+          if (ps) { head.connect(ps); ps.connect(g); elPitch.set(m, { node: ps, on: false, algo: pitchAlgo, own: null }); ps.port.postMessage({ algo: pitchAlgo, extra: pitchExtra }); } else head.connect(g);
+          g.connect(src);
+          elGain.set(m, g);
+        }
         out = c.createGain();
         out.gain.value = volume;
         analyser = c.createAnalyser();
         analyser.fftSize = 8192;
         analyser.smoothingTimeConstant = 0.75;
+        beatAn = c.createAnalyser();
+        beatAn.fftSize = 2048;
+        beatAn.smoothingTimeConstant = 0;
         out.connect(c.destination);
         // The output, after the volume, left and right: the volume meter and the oscilloscope.
         const split = c.createChannelSplitter(2);
@@ -134,6 +239,7 @@ registerProcessor('nabbit-fx', NabbitFx);
         split.connect(meterL, 0);
         split.connect(meterR, 1);
         ctx = c;
+        c.addEventListener('statechange', () => { if (c.state === 'running') drawOutput(); });
         for (const m of mediaEls) m.volume = 1; // the volume now comes last, after the effects
         routed = null;
         route();
@@ -149,6 +255,36 @@ registerProcessor('nabbit-fx', NabbitFx);
     })();
     return starting;
   }
+  const elGain = new Map(); // player → its level (DJ mode's crossfades)
+  const elPitch = new Map(); // player → { node, on } (DJ mode's key shifts)
+  const elTime = new Map(); // player → { node, on } (the time shaper)
+  // The time shaper follows the song: its time, the audio clock's frame then, and the playback rate.
+  function timeClock(el, reset = false) {
+    const t = elTime.get(el);
+    if (!t || !ctx || !(t.on || t.slOn)) return;
+    t.node.port.postMessage({ reset, clock: { song: el.currentTime, frame: Math.round(ctx.currentTime * ctx.sampleRate), rate: el.playbackRate || 1, playing: !el.paused && !el.ended } });
+  }
+  for (const m of mediaEls) {
+    for (const ev of ['play', 'playing', 'ratechange', 'timeupdate', 'pause', 'ended', 'waiting']) m.addEventListener(ev, () => timeClock(m));
+    for (const ev of ['seeked', 'loadeddata']) m.addEventListener(ev, () => timeClock(m, true));
+  }
+  const ALGO_LATENCY = { pv: 2048, wsola: 4096, pro: 4096, mono: 4096, resynth: 2048, chord: 2048 };
+  let pitchAlgo = 'pv';
+  try { const a = localStorage.getItem('nabbit.pitchAlgo'); if (ALGO_LATENCY[a]) pitchAlgo = a; } catch { /* default */ }
+  // A player's engine: its own (DJ mode / Speed: useAlgo) or Audio Tools' (pitchAlgo).
+  const algoOf = (p) => (p && p.own) || pitchAlgo;
+  const NEUTRAL = { formantRatio: 1, voices: null, targets: null, robotHz: 130.81 };
+  // Switches a player's engine: with a short dip when it can be heard.
+  function switchAlgo(el, p, a) {
+    if (p.algo === a) return;
+    p.algo = a;
+    const g = elGain.get(el);
+    if (!p.on || !g || !ctx || el.paused) { p.node.port.postMessage({ algo: a }); return; }
+    const t = ctx.currentTime, level = p.dipping ? p.level : g.gain.value;
+    g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(0, t + 0.025);
+    setTimeout(() => { p.node.port.postMessage({ algo: a }); const t2 = ctx.currentTime; g.gain.cancelScheduledValues(t2); g.gain.setValueAtTime(0, t2); g.gain.linearRampToValueAtTime(level, t2 + 0.04); }, 35);
+  }
+  let pitchExtra = { formantRatio: 1, voices: null, targets: null, robotHz: 130.81 };
   // Through the chain when any effect is on; straight to the volume when none is.
   let routed = null;
   function route() {
@@ -162,6 +298,7 @@ registerProcessor('nabbit-fx', NabbitFx);
     if (on) src.connect(node);
     last.connect(out);
     last.connect(analyser);
+    if (beatAn) last.connect(beatAn);
   }
   // The settings, to the worklet.
   function tell() {
@@ -170,10 +307,153 @@ registerProcessor('nabbit-fx', NabbitFx);
   }
   // The play bar's volume (player-mode.js calls this): true when it's applied here, after the effects.
   window.PlayerFx = {
+    // How much the low end (the kick, ~40–160 Hz) rose since last asked: ≥ 0, about 0..1 for a hit;
+    // null with no sound graph or nothing playing. Before the volume, so it doesn't follow the bar.
+    pulse() {
+      if (!beatAn || media.paused || ctx.state !== 'running') return null;
+      if (!beatBuf) { beatBuf = new Uint8Array(beatAn.frequencyBinCount); beatPrev = new Float32Array(16); }
+      beatAn.getByteFrequencyData(beatBuf);
+      const hz = ctx.sampleRate / beatAn.fftSize, a = Math.max(1, Math.floor(40 / hz)), b = Math.min(15, Math.ceil(160 / hz));
+      let f = 0;
+      for (let k = a; k <= b; k++) { const v = beatBuf[k] / 255; f += Math.max(0, v - beatPrev[k]); beatPrev[k] = v; }
+      return f / (b - a + 1);
+    },
     output(g) {
       volume = g;
       if (!out) return false;
       out.gain.setTargetAtTime(g, ctx.currentTime, 0.015);
+      return true;
+    },
+    // DJ mode: a player's level now (level) or along an equal-power curve over secs (fade: 'in' / 'out').
+    // The curve runs on the audio clock, so it holds still while paused. false when there's no graph.
+    level(el, v) {
+      const g = elGain.get(el);
+      if (!g) return false;
+      g.gain.cancelScheduledValues(0);
+      g.gain.value = v;
+      return true;
+    },
+    // DJ mode's pitch shifter on a player: ratio (2^(semitones / 12)) turns it on, null off. Turn it on or off
+    // only while that player is silent (its delay appears or goes). false when there isn't one.
+    // dip: it can be heard: a 25 ms fade down, the switch, and back up (its delay comes or goes in the gap).
+    pitch(el, ratio, { dip = false } = {}) {
+      const p = elPitch.get(el);
+      if (!p || !ctx) return false;
+      const on = ratio != null && ratio > 0;
+      if (on) p.node.parameters.get('ratio').setValueAtTime(Math.max(0.25, Math.min(4, ratio)), ctx.currentTime);
+      if (on === p.on) return true;
+      p.on = on;
+      const g = elGain.get(el);
+      if (!dip || !g) { p.node.port.postMessage({ on }); return true; }
+      // The level to come back to: taken before the first dip (switching again mid-dip mustn't take
+      // the dipped level as the real one).
+      const t = ctx.currentTime;
+      if (!p.dipping) p.level = g.gain.value;
+      p.dipping = true;
+      const level = p.level;
+      g.gain.cancelScheduledValues(t);
+      g.gain.setValueAtTime(g.gain.value, t);
+      g.gain.linearRampToValueAtTime(0, t + 0.025);
+      clearTimeout(p.dipTimer);
+      p.dipTimer = setTimeout(() => {
+        p.node.port.postMessage({ on: p.on });
+        const t2 = ctx.currentTime;
+        g.gain.cancelScheduledValues(t2);
+        g.gain.setValueAtTime(0, t2);
+        g.gain.linearRampToValueAtTime(level, t2 + 0.04);
+        setTimeout(() => { p.dipping = false; }, 50);
+      }, 35);
+      return true;
+    },
+    pitchOn: (el) => !!(elPitch.get(el) && elPitch.get(el).on),
+    canPitch: () => elPitch.size > 0 && !!ctx,
+    // Seconds a player's sound comes out later while its shifter is on (2048 samples).
+    pitchLatency: (el) => (ctx && elPitch.get(el) && elPitch.get(el).on ? (ALGO_LATENCY[algoOf(elPitch.get(el))] || 2048) / ctx.sampleRate : 0),
+    // A player's own engine (DJ mode's key shifts, Speed with Key lock), with plain settings (no formant
+    // move, no chord); null: back to Audio Tools' engine and settings.
+    useAlgo(el, a) {
+      const p = elPitch.get(el);
+      if (!p || !ctx) return false;
+      const own = a && ALGO_LATENCY[a] ? a : null;
+      if (own === p.own) return true;
+      p.own = own;
+      p.node.port.postMessage({ extra: own ? NEUTRAL : pitchExtra });
+      switchAlgo(el, p, algoOf(p));
+      return true;
+    },
+    // The pitch shifter's engine for every player: 'pv' (phase vocoder: smooth, best on full mixes) or
+    // 'wsola' (time-domain: punchy, best on vocals and drums). Kept for next time. A player that's
+    // shifting dips for a moment while it changes over (the delay changes too).
+    get pitchAlgo() { return pitchAlgo; },
+    // The metronome (Audio Tools' beat grid): a click at audio-clock time `when`, after the effects and
+    // at the play bar's volume, so it lines up with what's heard. accent: the first beat of a bar.
+    get now() { return ctx && ctx.state === 'running' ? ctx.currentTime : null; },
+    clickAt(when, accent = false) {
+      if (!ctx || !out) return false;
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = accent ? 1760 : 1320;
+      g.gain.setValueAtTime(0, when);
+      g.gain.linearRampToValueAtTime(accent ? 0.55 : 0.32, when + 0.001);
+      g.gain.exponentialRampToValueAtTime(0.0005, when + 0.05);
+      o.connect(g); g.connect(out);
+      o.start(when); o.stop(when + 0.06);
+      return true;
+    },
+    // The time shaper on a player: { shape: { points, curves, cycle, steps }, bpm, offset, from?, once? }, or null for
+    // off. false when there isn't one.
+    timeShape(el, o) {
+      const t = elTime.get(el);
+      if (!t || !ctx) return false;
+      const on = !!(o && o.shape && o.bpm > 0);
+      if (!on && !t.on) return true;
+      const key = on ? JSON.stringify(o) : '';
+      if (key === t.key) return true;
+      t.key = key;
+      t.on = on;
+      // from (song s): starts there (the cycles counted from it); once: one cycle, then silence.
+      t.node.port.postMessage(on ? { grid: { bpm: o.bpm, offset: o.offset || 0, ...(o.from != null ? { from: o.from, once: !!o.once } : {}) }, shape: o.shape } : { shape: null });
+      if (on) timeClock(el);
+      return true;
+    },
+    // Live slice stretch / slice map on a player: { key (the song), pcm (interleaved stereo f32 at
+    // sampleRate), cuts (samples), mode: 'map' | 'stretch' }, or null for off. false when it can't.
+    slices(el, o) {
+      const t = elTime.get(el);
+      if (!t || !ctx) return false;
+      if (!o || !o.pcm) {
+        if (t.slOn) { t.slOn = false; t.slKey = ''; t.node.port.postMessage({ slices: null }); }
+        return true;
+      }
+      if (t.pcmKey !== o.key) {
+        // The other player lets go of its copy (only one song is sliced at a time).
+        for (const [m, u] of elTime) if (m !== el && u.pcmKey) { u.pcmKey = ''; u.slOn = false; u.slKey = ''; u.node.port.postMessage({ drop: true }); }
+        t.pcmKey = o.key; t.node.port.postMessage({ pcm: o.pcm });
+      }
+      const sk = `${o.key}|${o.mode}|${o.cuts.length}|${o.cuts[0]}|${o.cuts[o.cuts.length - 1]}`;
+      if (sk !== t.slKey || !t.slOn) { t.slKey = sk; t.slOn = true; t.node.port.postMessage({ slices: { cuts: o.cuts, mode: o.mode } }); }
+      timeClock(el);
+      return true;
+    },
+    get sampleRate() { return ctx ? ctx.sampleRate : 0; },
+    // The engines' other settings: formantRatio (Pro, Mono, Resynth, Chord), targets (Chord: the notes
+    // held, in Hz; null for none), robotHz (Resynth's note).
+    pitchExtra(x) { Object.assign(pitchExtra, x || {}); for (const p of elPitch.values()) if (!p.own) p.node.port.postMessage({ extra: pitchExtra }); },
+    setPitchAlgo(a) {
+      if (!ALGO_LATENCY[a] || a === pitchAlgo) return;
+      pitchAlgo = a;
+      try { localStorage.setItem('nabbit.pitchAlgo', a); } catch { /* not kept */ }
+      for (const [el, p] of elPitch) if (!p.own) switchAlgo(el, p, a);
+    },
+    // delay (s): held where it is until then (a transition effect plays out at full level first).
+    fade(el, dir, secs, delay = 0) {
+      const g = elGain.get(el);
+      if (!g || !ctx) return false;
+      const n = 64, curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) { const x = i / (n - 1), a = (x * Math.PI) / 2; curve[i] = dir === 'in' ? Math.sin(a) : Math.cos(a); }
+      g.gain.cancelScheduledValues(0);
+      if (delay > 0) g.gain.setValueAtTime(dir === 'in' ? 0 : 1, ctx.currentTime);
+      g.gain.setValueCurveAtTime(curve, ctx.currentTime + 0.005 + Math.max(0, delay), Math.max(0.05, secs));
       return true;
     },
     // Whether the player should play your files through the stream server (the effects are set up).
@@ -181,7 +461,7 @@ registerProcessor('nabbit-fx', NabbitFx);
     // Resolves once the effects are set up (so a song loaded now goes the right way from the start).
     ready: () => Promise.resolve(ensureAudio()).catch(() => {}),
     // The player switched to the other player (gapless).
-    setActive(el) { if (mediaEls.includes(el)) { media = el; if (ctx) el.volume = 1; sync(); } },
+    setActive(el) { if (mediaEls.includes(el)) { media = el; if (ctx) el.volume = 1; sync(); drawOutput(); } },
     // How far behind the player's clock the sound is (seconds): the processing buffer, the spectral
     // compressor's window (Mastering preset) and the plugins' delay. Lyrics and synced videos wait for it.
     delay() {
@@ -203,7 +483,7 @@ registerProcessor('nabbit-fx', NabbitFx);
   // Set up straight away (suspended until something plays): the volume meter and oscilloscope need it,
   // and your files then play through the stream server from the first song.
   setTimeout(() => ensureAudio(), 0);
-  for (const m of mediaEls) m.addEventListener('play', () => { ensureAudio(); drawOutput(); });
+  for (const m of mediaEls) for (const ev of ['play', 'playing']) m.addEventListener(ev, () => { ensureAudio(); if (m === media) drawOutput(); });
 
   // ---------- Volume meter (L/R) and oscilloscope, on the play bar ----------
   const vm = $('lp-vmeter'), osc = $('lp-osc');
@@ -330,6 +610,7 @@ registerProcessor('nabbit-fx', NabbitFx);
   function drawOutput() {
     if (drawing) return;
     drawing = true;
+    stopAt = 0; // a pause from before doesn't count (the audio clock may take a moment to start again)
     lastT = performance.now();
     const step = (t) => {
       const dt = Math.min(0.1, (t - lastT) / 1000);
@@ -338,7 +619,8 @@ registerProcessor('nabbit-fx', NabbitFx);
       if (live) stopAt = 0; else if (!stopAt) stopAt = t;
       const barShown = !$('lp-bar').classList.contains('hidden') && !document.hidden;
       if (barShown) { drawMeter(t, dt, live); drawOsc(dt, live); }
-      if (!live && t - stopAt > 1500) { drawing = false; return; }
+      // Keeps going while the song is meant to play (the clock resuming), else stops a moment after.
+      if (!live && media.paused && t - stopAt > 1500) { drawing = false; return; }
       requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
@@ -570,35 +852,64 @@ registerProcessor('nabbit-fx', NabbitFx);
       list.append(li);
     });
     f.append(list);
+    // Adding a plugin: a list of your VST3 plugins that opens in the panel (not a drop-down: those
+    // close whenever anything on the page scrolls, like the lyrics).
     const add = el('div', 'lp-fx-add');
-    const sel = el('select', 'lp-fx-sel');
-    sel.append(el('option', '', 'Add a plugin…'));
-    sel.options[0].value = '';
+    const pick = el('button', 'lp-fx-pick', 'Add a plugin ▾');
+    pick.type = 'button';
+    pick.setAttribute('aria-expanded', 'false');
     const more = el('button', 'lp-fx-chip', 'Add folder…');
     more.type = 'button';
     more.title = 'A folder with more VST3 plugins (C:\\Program Files\\Common Files\\VST3 is always looked in)';
-    add.append(sel, more);
-    f.append(add);
+    add.append(pick, more);
+    const menu = el('div', 'lp-fx-menu hidden');
+    menu.setAttribute('role', 'listbox');
+    const filter = el('input', 'lp-fx-find');
+    filter.type = 'text';
+    filter.placeholder = 'Find a plugin…';
+    filter.setAttribute('aria-label', 'Find a plugin');
+    const items = el('div', 'lp-fx-items');
+    menu.append(filter, items);
+    f.append(add, menu);
+    let found = [];
     const fill = (info) => {
-      while (sel.options.length > 1) sel.remove(1);
-      if (!info) return;
-      for (const pl of info.plugins) { const o = el('option', '', pl.name); o.value = pl.path; sel.append(o); }
-      if (!info.plugins.length) { const o = el('option', '', 'No VST3 plugins found'); o.disabled = true; sel.append(o); }
+      if (info) found = info.plugins || [];
+      items.textContent = '';
+      const q = filter.value.trim().toLowerCase();
+      const list = found.filter((pl) => !q || pl.name.toLowerCase().includes(q));
+      for (const pl of list) {
+        const it = el('button', 'lp-fx-it', pl.name);
+        it.type = 'button';
+        it.title = pl.path;
+        it.setAttribute('role', 'option');
+        it.addEventListener('click', () => addPlugin(pl));
+        items.append(it);
+      }
+      if (!list.length) items.append(el('p', 'lp-fx-note', found.length ? 'No match.' : 'No VST3 plugins found. Add a folder that has some.'));
     };
+    const openMenu = (open) => {
+      menu.classList.toggle('hidden', !open);
+      pick.setAttribute('aria-expanded', String(open));
+      if (open) { filter.value = ''; fill(); filter.focus(); }
+    };
+    pick.addEventListener('click', () => openMenu(menu.classList.contains('hidden')));
+    filter.addEventListener('input', () => fill());
+    filter.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); openMenu(false); pick.focus(); }
+      else if (e.key === 'Enter') { const first = items.querySelector('.lp-fx-it'); if (first) first.click(); }
+    });
     if (window.api.vstInfo) window.api.vstInfo().then((info) => { fill(info); if (info && !info.host && !host.error && !pop.querySelector('.lp-fx-nohost')) { const n = el('p', 'lp-fx-note err lp-fx-nohost', "The plugin host isn't built yet: see vsthost\\README.md."); add.before(n); } }).catch(() => {});
-    sel.addEventListener('change', async () => {
-      const pth = sel.value;
-      if (!pth) return;
-      const name = sel.options[sel.selectedIndex].textContent;
+    async function addPlugin(pl) {
+      openMenu(false);
       const id = Math.max(0, ...fx.plugins.map((x) => x.id)) + 1;
-      const p = { id, path: pth, name, on: true, comp: '', ctrl: '' };
+      const p = { id, path: pl.path, name: pl.name, on: true, comp: '', ctrl: '' };
       fx.plugins.push(p);
       fx.on.vst = true;
       changed();
       ensureAudio();
       if (host.state === 'on') { await loadPlugin(p); sendOrder(); } else await startHost();
       paint();
-    });
+    }
     more.addEventListener('click', async () => { const info = await window.api.vstAddFolder().catch(() => null); if (info) fill(info); });
     return f;
   }

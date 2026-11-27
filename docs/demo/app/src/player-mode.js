@@ -77,6 +77,19 @@
   const artistOf = (t) => t.albumArtist || t.artist || 'Unknown artist';
   // Everyone credited on a song (album artist and track artists, "A; B" split), for the Artists list.
   const artistsOf = (t) => { const s = Core.splitArtists(`${t.albumArtist || ''};${t.artist || ''}`); return s.length ? s : ['Unknown artist']; };
+  // The sidebar's artists are your artist folders: the first folder inside a library folder
+  // (Music\Artist\Album\song), whatever the tags say. Songs right in a library folder have none.
+  const artistDirCache = new WeakMap();
+  function artistDirOf(t) {
+    if (artistDirCache.has(t)) return artistDirCache.get(t);
+    const p = String(t.path), low = p.toLowerCase();
+    let root = '';
+    for (const r of folders) { const rr = String(r).replace(/[\\/]+$/, ''); if (low.startsWith(rr.toLowerCase() + '\\') || low.startsWith(rr.toLowerCase() + '/')) { if (rr.length > root.length) root = rr; } }
+    const parts = (root ? p.slice(root.length + 1) : p).split(/[\\/]/).filter(Boolean);
+    const dir = root && parts.length >= 2 ? parts[0] : null;
+    artistDirCache.set(t, dir);
+    return dir;
+  }
 
   function filtered() {
     const q = $('lib-q').value.trim().toLowerCase();
@@ -88,14 +101,14 @@
       if (view.kind === 'recent' && !(t.mtime > Date.now() - 30 * DAY)) return false;
       if (view.kind === 'loved' && !t.loved) return false;
       if (view.kind === 'rated' && !(t.rating >= 4)) return false;
-      if (view.artist && !artistsOf(t).includes(view.artist)) return false;
+      if (view.artist && artistDirOf(t) !== view.artist) return false;
       return !q || [t.title, t.artist, t.album, t.albumArtist, t.genre].some((x) => String(x || '').toLowerCase().includes(q));
     });
   }
 
   // ---------- Sidebar ----------
   function renderSide() {
-    const views = [['all', 'All music', tracks.length], ['recent', 'Recently added', tracks.filter((t) => t.mtime > Date.now() - 30 * 86400000).length],
+    const views = [['all', 'Local Files', tracks.length], ['recent', 'Recently added', tracks.filter((t) => t.mtime > Date.now() - 30 * 86400000).length],
       ['loved', 'Loved', tracks.filter((t) => t.loved).length], ['rated', '4 stars and up', tracks.filter((t) => t.rating >= 4).length]];
     const vb = $('lib-views');
     vb.textContent = '';
@@ -130,7 +143,7 @@
     }
     if (!playlists.length) pb.append(el('div', 'lib-none', 'Right-click a song to add it to one.'));
     const counts = new Map();
-    for (const t of tracks) for (const a of artistsOf(t)) counts.set(a, (counts.get(a) || 0) + 1);
+    for (const t of tracks) { const a = artistDirOf(t); if (a) counts.set(a, (counts.get(a) || 0) + 1); }
     const ab = $('lib-artists');
     ab.textContent = '';
     for (const [name, n] of [...counts].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: 'base' }))) {
@@ -160,6 +173,7 @@
   }
   $('lib-q').addEventListener('input', () => renderList());
   // ---------- Playlists ----------
+  const outside = new Map(), outsideAsked = new Set(); // path → track, for songs outside the library
   function newPlaylist(items = [], open = true) {
     const pl = PC.newPlaylist(`Playlist ${playlists.length + 1}`, items);
     savePlaylists([...playlists, pl]);
@@ -201,6 +215,13 @@
     const pl = playlists.find((p) => p.id === view.id);
     if (!pl) { view = { kind: 'all', artist: null }; renderList(); return; }
     const byPath = new Map(tracks.map((t) => [t.path, t]));
+    for (const [p, t] of outside) if (!byPath.has(p)) byPath.set(p, t);
+    // Songs from outside your music folders (added from Explorer or Recent downloads): read once.
+    const unknown = pl.items.filter((p) => !byPath.has(p) && !outsideAsked.has(p));
+    if (unknown.length) {
+      for (const p of unknown) outsideAsked.add(p);
+      window.api.playFilesInfo(unknown).then((got) => { for (const t of got || []) outside.set(t.path, t); if ((got || []).length && view.kind === 'playlist') renderList(); }).catch(() => {});
+    }
     const q = $('lib-q').value.trim().toLowerCase();
     const match = (t) => !q || [t.title, t.artist, t.album, t.albumArtist].some((x) => String(x || '').toLowerCase().includes(q));
     const rows = pl.items.map((p, i) => ({ p, i, t: byPath.get(p) })).filter((x) => !x.t || match(x.t));
@@ -294,6 +315,13 @@
       const idx = (playlists.find((p) => p.id === view.id) || { items: [] }).items.indexOf(t.path);
       if (idx >= 0) item('Take out of this playlist', () => editPlaylist(view.id, (p) => PC.removeAt(p, idx)));
     }
+    // Your own files: split them, shrink them, or look for them on Soulseek (src/file-actions.js).
+    if (!t.stream && t.path && window.FileActions) {
+      sep();
+      item('Separate stems', () => window.FileActions.stems([t.path]));
+      item('Compress', () => window.FileActions.compress([t.path]));
+      item('Search on Soulseek', () => window.FileActions.soulseek(t));
+    }
     sep();
     item('Show in folder', () => window.api.showItem(t.path));
     document.body.append(m);
@@ -378,9 +406,18 @@
     }
     const tr = filtered();
     albums = sortBy === 'folder' ? Core.groupFolders(tr, folders) : Core.groupAlbums(tr, folders);
-    $('lp-sort').textContent = `Sort: ${sortBy === 'folder' ? 'Folder' : 'Album'}`;
+    // Sort: an album (a disc) or a folder, whichever it's sorted by.
+    const sb = $('lp-sort'), byFolder = sortBy === 'folder';
+    if (sb.dataset.by !== sortBy) {
+      sb.dataset.by = sortBy;
+      sb.innerHTML = byFolder
+        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></svg>'
+        : '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.5"/></svg>';
+      sb.setAttribute('aria-label', `Sort: ${byFolder ? 'Folder' : 'Album'}`);
+      sb.title = byFolder ? 'Following your folders: click to group by album' : 'Grouped by album: click to follow your folders';
+    }
     shown = albums.flatMap((a) => a.tracks);
-    $('lp-title').textContent = view.artist || { all: 'All music', recent: 'Recently added', loved: 'Loved', rated: '4 stars and up' }[view.kind];
+    $('lp-title').textContent = view.artist || { all: 'Local Files', recent: 'Recently added', loved: 'Loved', rated: '4 stars and up' }[view.kind];
     const total = shown.reduce((s, t) => s + (t.duration || 0), 0);
     $('lp-stats').textContent = shown.length ? `${albums.length} album${albums.length === 1 ? '' : 's'} · ${shown.length} songs · ${fmtLong(total)}` : '';
     list.textContent = '';
@@ -533,14 +570,16 @@
     return tracks.find((x) => x !== t && x.hasVideo && x.playable && dirOf(x.path) === d && (stem(x.path) === s || (title && String(x.title || '').toLowerCase() === title))) || null;
   }
   // No local video: YouTube's music video (looked up when Video is on), played with its own audio.
-  let yt = null; // { forPath, file, synced, title, channel } for the current song
+  // Streamed songs (YouTube Music, SoundCloud) get one too, always muted and kept in step with the song.
+  let yt = null; // { forPath, file, synced, title, channel } for the current song (forPath: vKey)
+  const vKey = (t) => (t ? (t.stream ? `u:${t.url}` : t.path) : null);
   let ytAudio = 'youtube';
   try { ytAudio = localStorage.getItem('nabbit.lpYtAudio') === 'local' ? 'local' : 'youtube'; } catch { /* default */ }
   // Local / YouTube audio, switched live (same point in the song).
   function setYtAudio(mode) {
     ytAudio = mode;
     try { localStorage.setItem('nabbit.lpYtAudio', mode); } catch { /* none */ }
-    if (!(yt && current && yt.forPath === current.path)) return;
+    if (!(yt && current && yt.forPath === vKey(current)) || current.stream) return;
     yt.synced = mode === 'local';
     if (yt.synced) {
       swapSource(current.path);
@@ -556,11 +595,11 @@
   let ytBusy = null;
   const ytv = $('lp-ytv');
   ytv.muted = true;
-  const sourceFor = (t) => (videoOn && videoFor(t) ? videoFor(t).path : videoOn && yt && yt.forPath === t.path && !yt.synced ? yt.file : t.path);
+  const sourceFor = (t) => (videoOn && videoFor(t) ? videoFor(t).path : videoOn && yt && yt.forPath === vKey(t) && !yt.synced ? yt.file : t.path);
   function paintVideo() {
     const local = videoFor(current);
-    $('lp-vtoggle').classList.toggle('hidden', !current || !!current.stream);
-    const ytShow = !!(videoOn && !local && yt && current && yt.forPath === current.path);
+    $('lp-vtoggle').classList.toggle('hidden', !current);
+    const ytShow = !!(videoOn && !local && yt && current && yt.forPath === vKey(current));
     const show = !!(videoOn && (local || ytShow));
     $('lp-cover').classList.toggle('video', show && !(ytShow && yt.synced));
     $('lp-cover').classList.toggle('ytsync', show && ytShow && yt.synced);
@@ -573,6 +612,7 @@
     if (ytShow) {
       $('lp-yt-t').textContent = `YouTube · ${yt.title}`;
       $('lp-yt-t').title = `${yt.title}\n${yt.channel || ''}`;
+      document.querySelector('.lp-yt-aud').classList.toggle('hidden', !!current.stream); // a streamed song's own sound always plays
       for (const b of document.querySelectorAll('[data-ytaud]')) { const on = (b.dataset.ytaud === 'local') === yt.synced; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); }
     }
   }
@@ -595,6 +635,7 @@
   const loopArgs = (t) => { const v = videoFor(t); return { local: v ? v.path : null }; };
   async function loadLoop(t) {
     if (!loopOn || !t || (loop && loop.forPath === loopKey(t))) return;
+    if (t.stream && !t.detailsIn) return; // once it's downloaded (openStream)
     loopBusy = true;
     paintLoop();
     const r = await loopAsk(t).catch(() => null);
@@ -608,7 +649,8 @@
       for (let k = 1; k <= 12; k++) {
         if (current !== t) return;
         const nx = queue[qi + k];
-        if (nx && nx.playable && nx.title) await loopAsk(nx, k > 2).catch(() => {});
+        // A streamed song waits for its details (its own artist), found when it's fetched ahead.
+        if (nx && nx.playable && nx.title && (!nx.stream || nx.detailsIn)) await loopAsk(nx, k > 2).catch(() => {});
       }
     })();
   }
@@ -675,7 +717,7 @@
   };
   // Swap what the player plays (same song, other file), carrying on from the same point.
   async function swapSource(want) {
-    if (!current || curSrc === want) return;
+    if (!current || current.stream || !want || curSrc === want) return;
     const at = audio.currentTime, playing = !audio.paused;
     curSrc = want;
     if (!(await setLocalSrc(want))) return;
@@ -685,7 +727,7 @@
   }
   function syncYt(force = false) {
     // The muted music video only runs while you can see it (not in the Toolbox).
-    if (!(mode === 'player' && videoOn && yt && yt.synced && current && yt.forPath === current.path)) { if (!ytv.paused) ytv.pause(); return; }
+    if (!(mode === 'player' && videoOn && yt && yt.synced && current && yt.forPath === vKey(current))) { if (!ytv.paused) ytv.pause(); return; }
     const want = Math.max(0, audio.currentTime - fxDelay()); // in step with what's heard, not the player's clock
     if (force || Math.abs(ytv.currentTime - want) > 0.25) { try { ytv.currentTime = want; } catch { /* not ready */ } }
     ytv.playbackRate = audio.playbackRate;
@@ -695,14 +737,17 @@
   for (const ev of ['play', 'pause', 'seeked', 'ratechange']) onMedia(ev, () => syncYt(ev === 'seeked'));
   onMedia('timeupdate', () => syncYt(false));
   async function loadYt(t, next = false) {
-    if (!t || t.stream || videoFor(t)) return;
+    if (!t || videoFor(t)) return;
     ytBusy = 'Finding…';
     paintVideo();
     try {
-      const r = await window.api.libYtVideo(t.path, { next });
+      const r = t.stream
+        ? await window.api.streamYtVideo({ key: vKey(t), title: t.title, artist: (t.artistLinks && t.artistLinks[0] && t.artistLinks[0].name) || t.artist || '', duration: t.duration, next })
+        : await window.api.libYtVideo(t.path, { next });
       if (current !== t) return;
       // Audio: your file (the video muted and kept in step) or the video's own sound; your choice, remembered.
-      yt = { forPath: t.path, file: r.file, synced: ytAudio === 'local', title: r.title, channel: r.channel };
+      // A streamed song: always its own sound, the video following it.
+      yt = { forPath: vKey(t), file: r.file, synced: t.stream || ytAudio === 'local', title: r.title, channel: r.channel };
       ytBusy = null;
       if (yt.synced) {
         swapSource(t.path);
@@ -716,25 +761,30 @@
       if (current !== t) return;
       ytBusy = null;
       yt = null;
+      const why = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
       $('lp-vtoggle').textContent = 'No video';
-      $('lp-vtoggle').title = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+      $('lp-vtoggle').title = why;
+      // The reason, where it can be read (the details are in video-log.txt: Ctrl+click the Video button).
+      if (why !== 'Stopped') toast(`No music video: ${why.slice(0, 160)}`);
       setTimeout(() => { if (current === t) paintVideo(); }, 2500);
       return;
     }
     paintVideo();
   }
   window.api.onLibYtProgress(({ path, percent }) => {
-    if (!current || current.path !== path || !ytBusy) return;
+    if (!current || vKey(current) !== path || !ytBusy) return;
     ytBusy = `Video ${Math.floor(percent)}%`;
     $('lp-vtoggle').textContent = ytBusy;
   });
   $('lp-yt-next').addEventListener('click', () => { if (current) { const t = current; yt = null; swapSource(t.path); ytv.removeAttribute('src'); ytv.load(); paintVideo(); loadYt(t, true); } });
+  // Ctrl+click: why music videos haven't come (the log of failures).
+  $('lp-vtoggle').addEventListener('click', (e) => { if (e.ctrlKey && window.api.videoLog) { e.stopImmediatePropagation(); window.api.videoLog(); } }, true);
   $('lp-vtoggle').addEventListener('click', async () => {
     if (ytBusy) return;
     videoOn = !videoOn;
     try { localStorage.setItem('nabbit.lpVideo', videoOn ? '1' : '0'); } catch { /* none */ }
     if (current) {
-      if (videoOn && !videoFor(current) && !(yt && yt.forPath === current.path)) { paintVideo(); loadYt(current); return; }
+      if (videoOn && !videoFor(current) && !(yt && yt.forPath === vKey(current))) { paintVideo(); loadYt(current); return; }
       swapSource(sourceFor(current));
       syncYt(true);
     }
@@ -751,7 +801,7 @@
   $('lp-np-thumb').title = 'Double-click for the cover at full size';
   async function showFullCover() {
     if (!current || document.querySelector('.lp-lightbox')) return;
-    const url = current.stream ? current.thumbnail : await window.api.libCover(current.path, 'full').catch(() => null);
+    const url = current.stream ? current.art || current.thumbnail : await window.api.libCover(current.path, 'full').catch(() => null);
     if (!url) return;
     const box = el('div', 'lp-lightbox');
     box.setAttribute('role', 'dialog');
@@ -771,6 +821,7 @@
   // Double-click the video: full screen.
   for (const m of mediaEls) m.addEventListener('dblclick', () => { if (document.fullscreenElement) document.exitFullscreen(); else m.requestFullscreen().catch(() => {}); });
   let queue = [], base = [], qi = -1, current = null, shuffle = false, lrc = null;
+  let guest = null, guestRaf = 0; // another tool playing through the play bar (see attachGuest)
   const fileUrl = (p) => 'file:///' + p.replace(/\\/g, '/').replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/').replace(/^([A-Za-z])%3A/, '$1:');
   // The queue: the list you played from (base), in order or shuffled with the chosen song first.
   function order(list, i) {
@@ -788,10 +839,13 @@
   }
   let loadSeq = 0;
   async function start(i) {
+    cancelMix();
+    stretch = 1;
+    clearInterval(stretchGlide);
     while (i < queue.length && !queue[i].playable) i++;
     if (i >= queue.length) { stop(); return; }
     // The next song already loaded on the other player: switch to it (quicker, and no gap).
-    if (pre && pre.i === i && pre.t === queue[i] && !queue[i].stream) { handover(); return; }
+    if (pre && pre.i === i && pre.t === queue[i]) { handover(); return; }
     dropPre();
     qi = i;
     current = queue[i];
@@ -800,11 +854,11 @@
     if (t.stream) {
       audio.pause();
       paintVideo();
-      loadLoop(t);
-      await openStream(t, seq);
+      await openStream(t, seq); // the lyrics and the loop are looked up once it's here (openStream)
       return;
     }
     curSrc = sourceFor(t);
+    if (window.PlayerFx && window.PlayerFx.level) { window.PlayerFx.level(audio, 1); window.PlayerFx.pitch(audio, null); }
     if (!(await setLocalSrc(curSrc, seq))) return;
     applySpeed();
     paintVideo();
@@ -817,24 +871,69 @@
   // What every new song needs on screen (whichever way it started).
   function songStarted(t) {
     setTimeout(saveSession, 0);
+    if (!t.stream) setTimeout(() => { if (current === t) prefetchNext(); }, 0);
     lfStart(t);
     stream = null;
-    if (!yt || yt.forPath !== t.path) { yt = null; ytBusy = null; ytv.removeAttribute('src'); ytv.load(); }
+    if (!yt || yt.forPath !== vKey(t)) { yt = null; ytBusy = null; ytv.removeAttribute('src'); ytv.load(); }
     if (!loop || loop.forPath !== loopKey(t)) { loop = null; loopBusy = false; }
     wave = null;
     drawWave(true);
     if (!t.stream) loadWave(t);
     showBar();
     paintNow();
-    loadLyrics(t);
+    // A song from the Music Downloader: looked up once it's downloaded (its own artist and details
+    // then known), unless that's done already (fetched ahead).
+    if (!t.stream || t.detailsIn) loadLyrics(t);
+    else { const box = $('lp-lyrics'); box.textContent = ''; lrc = null; box.append(el('p', 'lp-nolyr', 'Lyrics once the song is here…')); }
     mediaMeta(t);
+    dcPush();
+    if (t.stream && videoOn && !(yt && yt.forPath === vKey(t))) loadYt(t); // its music video, with Video on
   }
+
+  // ---------- Discord (main.js shows it, if Settings → Discord is on) ----------
+  // The song, where it is and whether it plays; sent when any of that changes (main.js works out the bar).
+  let dcTimer = null;
+  function dcPush() {
+    clearTimeout(dcTimer);
+    dcTimer = setTimeout(() => {
+      if (!window.api.discordSong) return;
+      const t = current;
+      if (!t || guest) { window.api.discordSong(null); return; }
+      const d = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : Number(t.duration) || 0;
+      window.api.discordSong({ title: t.title || '', artist: t.artist || '', album: t.album || '', year: Number(t.year) || 0, duration: d, position: audio.currentTime || 0, playing: !audio.paused,
+        rate: audio.playbackRate || 1, stream: !!t.stream, url: t.url || '', art: [t.art, t.thumbnail].find((u) => /^https:/i.test(u || '')) || '' });
+    }, 400);
+  }
+  for (const ev of ['playing', 'pause', 'seeked', 'ratechange', 'durationchange']) onMedia(ev, dcPush);
 
   // ---------- Last.fm ----------
   // "Now playing" when a song starts playing; a scrobble once you've heard half of it or 4 minutes
   // (counting only time actually played, not skipped over). main.js / lastfm.js do the sending.
   let lf = { t: null, started: 0, played: 0, last: null, done: false, told: false };
   const lfInfo = (t) => ({ title: t.title, artist: t.artist, albumArtist: t.albumArtist, album: t.album, duration: audio.duration || t.duration });
+  // ---------- Your plays (for Nabbit Home) ----------
+  // A song counts once it has played as long as a scrobble needs (half of it, or 4 minutes). Kept on this
+  // PC: { key: { n, last, hits: [day…] (the last 60), item } }; key = p:<path> or u:<url>. item is what's
+  // needed to play a streamed song again (your own files are looked up in the library).
+  const PLAYS = 'nabbit.plays';
+  let plays = {};
+  try { plays = JSON.parse(localStorage.getItem(PLAYS) || '{}') || {}; } catch { plays = {}; }
+  let playsTimer = null;
+  function logPlay(t) {
+    if (!t || (!t.path && !t.url)) return;
+    const key = t.stream ? `u:${t.url}` : `p:${t.path}`;
+    const o = plays[key] || { n: 0, hits: [] };
+    const day = Math.floor(Date.now() / 86400000);
+    o.n++; o.last = Date.now();
+    o.hits = [...(o.hits || []), day].slice(-60);
+    if (t.stream) o.item = { url: t.url, title: t.title, artist: t.artist || '', album: t.album || '', thumbnail: t.thumbnail || t.art || null, duration: t.duration || 0 };
+    plays[key] = o;
+    const keys = Object.keys(plays);
+    if (keys.length > 800) keys.sort((x, y) => plays[x].last - plays[y].last).slice(0, keys.length - 800).forEach((k) => delete plays[k]);
+    clearTimeout(playsTimer);
+    playsTimer = setTimeout(() => { try { localStorage.setItem(PLAYS, JSON.stringify(plays)); } catch { /* not kept */ } }, 500);
+    document.dispatchEvent(new CustomEvent('nabbit-played'));
+  }
   function lfStart(t) { lf = { t, started: 0, played: 0, last: null, done: false, told: false }; }
   onMedia('playing', () => {
     if (!current || lf.t !== current) return;
@@ -848,10 +947,520 @@
     lf.last = now;
     if (!lf.done && lf.started && PC.scrobbleDue(lf.played, audio.duration || current.duration)) {
       lf.done = true;
+      logPlay(current);
       if (window.api.lastfmScrobble) window.api.lastfmScrobble(lfInfo(current), lf.started).catch(() => {});
     }
   });
   onMedia('seeked', () => { lf.last = audio.currentTime; });
+
+  // ---------- DJ mode ----------
+  // Songs blend into each other over a long crossfade: the next one starts on its first beat while the
+  // playing one is on a bar line near its end, sped up or slowed down (pitch kept) to the same tempo and
+  // held on the beat, then eased back to its own tempo once the old one has gone. When shuffling it can
+  // pick the next song that goes best (tempo, and key on the Camelot wheel). Tempo, first beat, key and
+  // where the sound starts and stops come from main.js (the Audio Tools' analyzer), once per song.
+  const DJ_KEY = 'nabbit.lpDj';
+  const dj = { on: false, fade: 12, match: true, pick: true, cut: true, cutBy: 'vocals', shift: false, lock: false, engine: 'auto', fx: 'auto' };
+  // DJ mode's (and Speed's) key-shift engine, its own (Audio Tools' choice doesn't carry over): Auto is
+  // WSOLA (punchy drums, natural voices: what works best in a mix).
+  const DJ_ENGINES = [['auto', 'Auto (WSOLA)', 'WSOLA'], ['pro', 'Pro', 'Formants kept: voices stay natural (93 ms)'], ['wsola', 'WSOLA', 'Punchy drums, natural voices; dense mixes can double a little (93 ms)'], ['pv', 'Phase vocoder', 'Smooth, best on held notes (46 ms)']];
+  const djEngine = () => (dj.engine === 'auto' || !DJ_ENGINES.some((x) => x[0] === dj.engine) ? 'wsola' : dj.engine);
+  // A key shift is a sample-rate change, so it goes on the Speed slider (which then shows it).
+  const semisOf = (f) => 12 * Math.log2(f);
+  // The pitch shifter (pitch.js, in the effects worklet): key shifts with the tempo stretched separately.
+  const shifterOK = () => !!(window.PlayerFx && window.PlayerFx.canPitch && window.PlayerFx.canPitch());
+  const pitchLag = (el) => (window.PlayerFx && window.PlayerFx.pitchLatency ? window.PlayerFx.pitchLatency(el) : 0);
+  try { Object.assign(dj, JSON.parse(localStorage.getItem(DJ_KEY) || '{}')); } catch { /* defaults */ }
+  if (dj.fx === 'half' || dj.fx === 'triplet') dj.fx = 'auto'; // no longer offered
+  const djSave = () => { try { localStorage.setItem(DJ_KEY, JSON.stringify(dj)); } catch { /* none */ } };
+  const djInfo = new Map(); // path → analysis, a Promise while it's worked out, or false
+  // Songs from the Music Downloader are analysed once they're whole on this PC (downloaded first, or
+  // cached), by their stream key: the playing one's, or the next one's from fetching it ahead.
+  const streamKeys = new Map(); // url → { key, src } from fetching ahead
+  const djId = (t) => (t.stream ? `s:${t.url}` : t.path);
+  const streamKeyOf = (t) => (t === current && stream ? stream.key : (streamKeys.get(t.url) || {}).key);
+  function djGet(t) {
+    if (!t || (!t.stream && !t.path) || !window.api.djAnalyze) return null;
+    const id = djId(t);
+    const v = djInfo.get(id);
+    if (v === undefined) {
+      const key = t.stream ? streamKeyOf(t) : null;
+      if (t.stream && (!key || !window.api.djAnalyzeStream)) return null; // not fetched yet
+      djInfo.set(id, (t.stream ? window.api.djAnalyzeStream(key) : window.api.djAnalyze(t.path))
+        .then((r) => { djInfo.set(id, r || false); if (t === current || t === queue[qi + 1]) djPaint(); if (t === current) drawWave(true); return r; })
+        // A streamed song still arriving: asked again once it's cached.
+        .catch((e) => { if (t.stream && /not-ready/.test(String(e && e.message))) djInfo.delete(id); else djInfo.set(id, false); if (t === current) djPaint(); }));
+      return null;
+    }
+    return v && !(v instanceof Promise) ? v : null;
+  }
+  // The analysis if it's done, without starting one.
+  const djPeek = (t) => { if (!t || (!t.stream && !t.path)) return null; const v = djInfo.get(djId(t)); return v && !(v instanceof Promise) ? v : null; };
+  const djPending = (t) => !!(t && (djInfo.get(djId(t)) instanceof Promise || (t.stream && streamFetching.has(t.url))));
+  // Fetching a streamed song ahead (the Music Downloader's cache / temporary folder): → { key, src } or null.
+  const streamFetching = new Map();
+  function streamAhead(t) {
+    if (streamKeys.has(t.url)) return Promise.resolve(streamKeys.get(t.url));
+    if (!streamFetching.has(t.url)) {
+      streamFetching.set(t.url, window.api.streamPrefetch(t.url, null)
+        .then((r) => { if (r && r.key) { streamKeys.set(t.url, r); if (streamDetails(t, r.meta, r.art) && t === current) paintNow(); if (r.meta) t.detailsIn = true; djPaint(); } return r && r.key ? r : null; })
+        .catch(() => null).finally(() => streamFetching.delete(t.url)));
+    }
+    return streamFetching.get(t.url);
+  }
+  const speedOn = () => $('lp-speed-on').checked;
+  // When shuffling: move the best of the next few songs up to play next. 'wait' while they're still
+  // being analysed (and there's time).
+  const PICK_N = 20;
+  function djPickNext() {
+    if (!dj.pick || !shuffle || !current || qi + 2 >= queue.length) return null;
+    const a = djGet(current);
+    // Time left before the mix (its main part's end when cutting), less the crossfade and a margin.
+    const act = a && dj.cut ? (a.action !== undefined ? a.action : (a.action = PC.actionSpan(a))) : null;
+    const endAt = (act && act.end) || (a && a.end) || audio.duration || current.duration || 0;
+    const time = endAt - audio.currentTime > dj.fade + 15;
+    if (!a) return djPending(current) && time ? 'wait' : null;
+    const cands = queue.slice(qi + 1, qi + 1 + PICK_N);
+    const infos = cands.map((t) => djGet(t)); // streamed songs count once they've been fetched and analysed
+    if (time && infos.some((x, k) => !x && djPending(cands[k]))) return 'wait';
+    // Same key first (after its shift, with Shift into key on), then what fits best.
+    const fitOf = (x, c) => PC.keyFit(x, semisOf(speedRate()), c, { shifter: !dj.lock || shifterOK(), stretch: stretchMax(), tempo: speedRate() * stretch });
+    const best = dj.shift
+      ? PC.pickNext(a, infos, (x, c) => { const f = fitOf(x, c); return f ? f.score : 99; }, (x, c) => { const f = fitOf(x, c); return f ? f.kd : null; })
+      : PC.pickNext(a, infos);
+    if (best > 0) { const [t] = queue.splice(qi + 1 + best, 1); queue.splice(qi + 1, 0, t); paintUpNext(); }
+    return null;
+  }
+  // Reroll: the songs still to come, shuffled again (the ones played stay where they were). The song
+  // loaded ahead is let go, so the pick is made again from the new next 20.
+  function djReroll() {
+    if (!current || qi + 1 >= queue.length) return;
+    if (!shuffle) { shuffle = true; paintShuffle(); }
+    const rest = queue.slice(qi + 1);
+    for (let k = rest.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [rest[k], rest[j]] = [rest[j], rest[k]]; }
+    queue = [...queue.slice(0, qi + 1), ...rest];
+    if (!mix) dropPre();
+    paintUpNext();
+    djPaint(); // starts analysing the new candidates
+    preloadSoon();
+  }
+  // The mix playing now: { old (the player fading out), el, a, b, plan, t0, hist, noSync, timer }.
+  let mix = null, glide = 0;
+  // Cut to the action, from the lyrics: the first vocals or the first chorus (synced lyrics, from the
+  // same places the lyrics panel looks), else where it gets loud. Lyrics for the next song are fetched
+  // while it's loaded.
+  const djLyrics = new Map(); // id → [{ t, text }] | false | Promise
+  function djLyricsOf(t) {
+    if (!t) return null;
+    if (t === current && lrc) return lrc;
+    const id = djId(t), v = djLyrics.get(id);
+    if (v === undefined) {
+      const ask = t.stream
+        ? window.api.streamLyrics({ title: t.title, artist: t.artist, album: t.album, duration: t.duration }).then((f) => (f && f.synced) || '')
+        : window.api.libLyrics(t.path, { online: lyricsOnline() }).then((r) => (r && r.text) || '');
+      djLyrics.set(id, ask.then((text) => { const L = text ? Core.parseLrc(text) : null; djLyrics.set(id, L || false); if (djPop) paintDjPop(); return L; })
+        .catch(() => { djLyrics.set(id, false); }));
+      return null;
+    }
+    return Array.isArray(v) ? v : null;
+  }
+  // x with its action worked out (x.action: { start, end, by: 'lyrics' | 'loud' } or null).
+  function withAction(t, x) {
+    if (!x || !dj.cut) return x;
+    const loud = PC.actionSpan(x);
+    let ly = null;
+    if (dj.cutBy !== 'loud') { const L = djLyricsOf(t); if (L) ly = PC.lyricsSpan(L, x, dj.cutBy); }
+    const start = ly && ly.start != null ? ly.start : loud ? loud.start : null;
+    const end = ly && ly.end != null ? ly.end : loud ? loud.end : null;
+    return { ...x, action: start == null && end == null ? null : { start, end, by: ly ? 'lyrics' : 'loud' } };
+  }
+  function planFor() {
+    const a = withAction(current, djGet(current)) || { duration: audio.duration }, b = withAction(pre.t, djGet(pre.t)) || {};
+    if (!a.duration) a.duration = audio.duration;
+    const fit = dj.shift && a.camelot && b.camelot ? PC.keyFit(a, semisOf(speedRate()), b, { shifter: !dj.lock || shifterOK(), stretch: stretchMax(), tempo: speedRate() * stretch }) : null;
+    // The next song in its own key, its tempo matched with the pitch kept (whatever Speed is at): keyFit's
+    // ratio (the songs' tempos) on top of the speed the outgoing one plays at.
+    if (fit && fit.stretch) return { ...PC.mixPlan(a, b, { fade: dj.fade, match: true, cut: dj.cut, fit }), stretch: true };
+    // Shifted for the key, its tempo matched on Stretch (within ±3 %, or ±8 % with Key lock).
+    const plan = PC.mixPlan(a, b, { fade: dj.fade, match: dj.match, cut: dj.cut, fit, max: stretchMax() });
+    return fit && fit.shifter ? { ...plan, shifter: true } : plan;
+  }
+  // Called while a song plays with the next one loaded: true when DJ mode takes care of the change.
+  function checkMix() {
+    if (mix || repeat === 'one' || !window.PlayerFx || !window.PlayerFx.fade || !window.PlayerFx.routed() || !Number.isFinite(audio.duration)) return false;
+    const plan = planFor();
+    if (plan.len < 1.5) return false; // too short to mix: the usual gapless change
+    // Where the next song starts: set on its player ahead of time (so it's loaded from there).
+    if (pre.el.readyState >= 1 && pre.at !== plan.inAt) { pre.at = plan.inAt; try { pre.el.currentTime = plan.inAt; } catch { pre.at = null; } }
+    if (audio.currentTime < plan.outAt) return true;
+    if (pre.el.readyState < 3 || pre.at !== plan.inAt) return audio.duration - audio.currentTime > 0.2; // not ready yet; at the very end, just change
+    startMix(plan);
+    return true;
+  }
+  // ---------- Speed × Stretch ----------
+  // Speed (the play bar) is a sample-rate change: tempo and pitch together. Stretch (the DJ pop-up) is
+  // tempo only, pitch kept. A song plays at Speed × Stretch, at Speed's pitch: with only one of them
+  // away from 100 % the player does it alone; with both, it stretches (pitch kept) and the pitch shifter
+  // (pitch.js) moves the pitch by Speed. Without the shifter, both together play like a record.
+  // DJ mode puts a key shift on Speed and its tempo matching on Stretch, then eases Stretch back to 100 %.
+  let stretch = 1; // the playing song's
+  const away = (x) => Math.abs(x - 1) > 1e-4;
+  // Stretch is like a turntable's pitch fader (a plain rate change: pitch follows, the same clean sound as
+  // normal playback) unless Key lock is on (tempo only, pitch kept: the browser's time-stretch, and the
+  // pitch shifter when Speed is away from 100 % too).
+  const stretchMax = () => (dj.lock ? 0.08 : 0.03);
+  const elRate = new Map(); // player → [speed, stretch] last set
+  function setRate(el, speed, str) {
+    elRate.set(el, [speed, str]);
+    if (window.PlayerFx && window.PlayerFx.useAlgo) window.PlayerFx.useAlgo(el, djEngine());
+    if (!dj.lock) {
+      if (window.PlayerFx && window.PlayerFx.pitchOn && window.PlayerFx.pitchOn(el)) window.PlayerFx.pitch(el, null, { dip: !el.paused && !mix });
+      el.preservesPitch = false;
+      el.playbackRate = speed * str;
+      return;
+    }
+    const useShifter = away(speed) && away(str) && shifterOK();
+    const on = !!(window.PlayerFx && window.PlayerFx.pitchOn && window.PlayerFx.pitchOn(el));
+    // The shifter's delay comes or goes with it: a short dip if it can be heard (not during a mix's fades).
+    if (useShifter !== on) window.PlayerFx.pitch(el, useShifter ? speed : null, { dip: !el.paused && !mix });
+    else if (useShifter) window.PlayerFx.pitch(el, speed);
+    el.preservesPitch = away(str) && (!away(speed) || useShifter);
+    el.playbackRate = speed * str;
+  }
+  function paintStretch() {
+    if (!djPop) return;
+    const sl = djPop.querySelector('.lp-dj-str');
+    if (sl && document.activeElement !== sl) sl.value = String(Math.round((stretch - 1) * 1000) / 10);
+    const v = djPop.querySelector('.lp-dj-strv');
+    if (v) v.textContent = `${Math.round(stretch * 1000) / 10} %`;
+  }
+  // Stretch by hand (the DJ pop-up), or back to 100 % after a mix.
+  let stretchGlide = 0;
+  function setStretch(v) {
+    stretch = Math.max(0.5, Math.min(2, v));
+    if (mix && mix.el === audio) { mix.toStretch = stretch; setRate(audio, mix.toSpeed, stretch); } else setRate(audio, speedRate(), stretch);
+    paintStretch();
+    djPaint();
+  }
+  // DJ mode's transition effects (the time shaper on the outgoing song, pitch.js SHAPES):
+  const DJ_FX = [['auto', 'Auto', 'A brake when the beats can\'t be held, else a plain crossfade'], ['off', 'None', 'A plain crossfade'], ['brake', 'Brake', 'A tape stop over the last bar, then gone'],
+    ['stutter', 'Stutter', 'A beat roll on the outgoing song from the bar past halfway']];
+  const FX_SHAPE = { brake: 'tapestop', stutter: 'stutter' };
+  // The effect for this mix: { kind, rt: { shape, bpm, offset, from, once }, len (s of the song) }, or null.
+  // From the song's own grid (Audio Tools → Beat grid) when you set one, else the analysis.
+  function djFxPlan(plan, t, a, t0) {
+    let kind = dj.fx;
+    if (kind === 'auto') kind = plan.matched ? 'off' : 'brake';
+    const P = window.NabbitPitch;
+    if (!FX_SHAPE[kind] || !P || !P.SHAPES || !t) return null;
+    const own = !t.stream && t.path ? gridOf(t.path) : null;
+    const g = own ? { bpm: own.bpm, offset: own.offset || 0 } : a && a.bpm > 0 ? { bpm: a.bpm, offset: a.offset || 0 } : null;
+    if (!g) return null;
+    const beat = 60 / g.bpm, bar = 4 * beat, end = t0 + plan.len;
+    const onGrid = (x, step, up) => g.offset + (up ? Math.ceil((x - g.offset) / step - 1e-6) : Math.floor((x - g.offset) / step + 1e-6)) * step;
+    const shape = JSON.parse(JSON.stringify(P.SHAPES[FX_SHAPE[kind]]));
+    if (kind === 'brake') {
+      // The last bar (or as many beats as the mix has), stopping as the mix ends.
+      const beats = Math.max(1, Math.min(4, Math.floor(plan.len / beat)));
+      shape.cycle = beats;
+      let from = onGrid(end - beats * beat, beat, false);
+      if (from < t0) from = onGrid(t0, beat, true);
+      return { kind, len: beats * beat, rt: { shape, bpm: g.bpm, offset: g.offset, from, once: true } };
+    }
+    // From the first bar line past halfway (or the first one at all when the mix is short).
+    let from = onGrid(t0 + plan.len / 2, bar, true);
+    if (from + bar > end) from = onGrid(t0, beat, true);
+    if (from >= end) return null;
+    return { kind, len: end - from, rt: { shape, bpm: g.bpm, offset: g.offset, from, once: false } };
+  }
+  function startMix(plan) {
+    const old = audio, el = pre.el, a = djGet(current), b = djGet(pre.t);
+    clearInterval(glide);
+    clearInterval(stretchGlide);
+    const aRate = speedRate() * stretch; // the outgoing song's tempo factor (it stays there)
+    window.PlayerFx.level(el, 0);
+    const real = plan.len / aRate; // the plan is in the songs' own time
+    window.PlayerFx.fade(el, 'in', real);
+    // A transition effect on the outgoing song (on its beat grid): a brake plays out at full level, then
+    // goes; the others come in halfway through the crossfade.
+    const fxp = djFxPlan(plan, current, a, old.currentTime);
+    if (fxp && window.PlayerFx.timeShape && window.PlayerFx.timeShape(old, fxp.rt)) {
+      if (fxp.kind === 'brake') window.PlayerFx.fade(old, 'out', Math.max(0.05, fxp.len / aRate), Math.max(0, (fxp.rt.from - old.currentTime) / aRate));
+      else window.PlayerFx.fade(old, 'out', real);
+    } else window.PlayerFx.fade(old, 'out', real);
+    // The new song: Speed at its key shift (or where Speed is), Stretch for the rest of the tempo.
+    const toSpeed = plan.fitted ? 2 ** (plan.shift / 12) : speedRate();
+    const tempo = plan.matched ? aRate * plan.rate : toSpeed; // held on the beat, or at its own speed
+    mix = { old, el, a, b, plan, t0: old.currentTime, hist: [], noSync: false, timer: 0, aRate, toSpeed, toStretch: tempo / toSpeed };
+    handover(plan);
+    mix.timer = setInterval(mixTick, 100);
+    djPaint();
+  }
+  function mixTick() {
+    if (!mix) return;
+    const { old, el, plan, a, b } = mix;
+    if (el !== audio) { cancelMix(); return; }
+    if (old.ended || old.currentTime - mix.t0 >= plan.len - 0.05) { endMix(); return; }
+    if (old.paused || el.paused || !plan.matched || !a || !b || mix.noSync) return;
+    // Hold the beats together with small speed changes (from the last three readings): firm while the
+    // new song is still quiet (it starts a little late), gentle after.
+    // Where each is heard (a shifter's delay taken off).
+    const err = PC.beatPhaseError(a, old.currentTime - pitchLag(old) * old.playbackRate, b, el.currentTime - pitchLag(el) * el.playbackRate, plan.mult); // in beats; + = ahead
+    const hist = mix.hist || (mix.hist = []);
+    hist.push(err);
+    if (hist.length > 3) hist.shift();
+    const e = hist.reduce((x, y) => x + y, 0) / hist.length;
+    const beatB = 60 / (b.bpm * plan.mult); // seconds of the new song per beat
+    const early = old.currentTime - mix.t0 < 3, lim = early ? 0.08 : 0.02, gain = early ? 1.2 : 0.6;
+    const adj = Math.abs(e) < 0.02 ? 0 : Math.max(-lim, Math.min(lim, -e * beatB * gain));
+    const r = mix.toSpeed * mix.toStretch * (1 + adj);
+    if (Math.abs(el.playbackRate - r) > 0.0005) el.playbackRate = r;
+  }
+  const letGo = (m) => { if (m && m.heldKey && window.api.streamHold) window.api.streamHold(m.heldKey, false).catch(() => {}); };
+  function endMix() {
+    if (!mix) return;
+    const { old, el } = mix;
+    letGo(mix);
+    clearInterval(mix.timer);
+    mix = null;
+    if (window.PlayerFx && window.PlayerFx.timeShape) window.PlayerFx.timeShape(old, null);
+    old.pause();
+    old.removeAttribute('src');
+    old.load();
+    window.PlayerFx.level(old, 1);
+    if (el === audio) {
+      window.PlayerFx.level(el, 1);
+      // Stretch back to 100 % (the song at its own tempo, at the Speed setting), gently: a quarter of a
+      // percent every tenth of a second.
+      easeStretch(el);
+    }
+    djPaint();
+    preloadSoon();
+  }
+  function easeStretch(el) {
+    clearInterval(stretchGlide);
+    if (!away(stretch)) { applySpeed(); return; }
+    stretchGlide = setInterval(() => {
+      if (el !== audio || mix) { clearInterval(stretchGlide); return; }
+      if (el.paused) return;
+      const step = 0.0025;
+      if (Math.abs(stretch - 1) <= step) { clearInterval(stretchGlide); setStretch(1); return; }
+      setStretch(stretch + (stretch < 1 ? step : -step));
+    }, 100);
+  }
+  // Stopped part-way (another song chosen, the player closed, DJ mode off): the old one stops now.
+  function cancelMix() {
+    clearInterval(glide);
+    if (!mix) return;
+    const { old, el } = mix;
+    letGo(mix);
+    clearInterval(mix.timer);
+    mix = null;
+    if (old !== audio && window.PlayerFx && window.PlayerFx.timeShape) window.PlayerFx.timeShape(old, null);
+    if (old !== audio) { old.pause(); old.removeAttribute('src'); old.load(); }
+    if (window.PlayerFx && window.PlayerFx.level) { window.PlayerFx.level(old, 1); window.PlayerFx.level(el, 1); }
+    if (el === audio) applySpeed();
+  }
+  // Next (button, Shift + →, media key) in DJ mode: the playing song jumps to where its crossfade
+  // starts, so the mix plays out; pressed again during a mix, the mix finishes at once. Without the
+  // next song ready to mix (streamed, too short, …) it's the usual change.
+  let skipping = 0;
+  function skipNext() {
+    if (!dj.on || !current || repeat === 'one' || !queue[qi + 1] || !window.PlayerFx || !window.PlayerFx.fade) { next(); return; }
+    if (mix) { endMix(); return; }
+    const seq = loadSeq;
+    const go = () => {
+      if (seq !== loadSeq || mix) return;
+      if (!pre || pre.i !== qi + 1 || (!current.stream && !pre.t.stream && !PC.canGapless(current, pre.t, { videoShown: videoOn }))) { next(); return; }
+      const plan = planFor();
+      if (plan.len < 1.5) { next(); return; }
+      if (audio.currentTime < plan.outAt - 0.05) seekTo(plan.outAt - 0.05);
+      if (audio.paused) audio.play().catch(() => {});
+      // If the next song isn't loaded in a few seconds, change the usual way.
+      clearTimeout(skipping);
+      skipping = setTimeout(() => { if (seq === loadSeq && !mix && current && audio.currentTime >= plan.outAt - 0.1) next(); }, 4000);
+    };
+    if (pre && pre.i === qi + 1) { go(); return; }
+    clearTimeout(preTimer);
+    Promise.resolve(preloadNext()).then(go, () => next());
+  }
+  // Pausing pauses both; seeking in the new song stops holding the beat.
+  onMedia('pause', () => { if (mix && !mix.old.paused) mix.old.pause(); });
+  onMedia('play', () => { if (mix && mix.old.paused) mix.old.play().catch(() => {}); });
+  onMedia('seeking', () => { if (mix) mix.noSync = true; });
+  function setDj(on) {
+    dj.on = !!on;
+    djSave();
+    if (!dj.on) cancelMix();
+    else if (current) { djGet(current); if (queue[qi + 1]) djGet(queue[qi + 1]); if (pre) { dropPre(); preloadSoon(); } }
+    djPaint();
+    toast(dj.on ? `DJ mode on · ${dj.fade} s crossfades` : 'DJ mode off');
+  }
+  // "128 BPM · 8A · A minor"; at another speed (rate), the tempo you hear with the song's own in
+  // brackets, and on a whole semitone the key you hear and the semitones.
+  const djTag = (x, rate = speedRate() * stretch, pitchRate = dj.lock ? speedRate() : speedRate() * stretch) => {
+    if (!x) return '';
+    const bpm = x.bpm ? Math.round(x.bpm * rate * 10) / 10 : 0, sm = semisOf(pitchRate);
+    const st = Math.abs(sm - Math.round(sm)) < 0.03 ? Math.round(sm) : 0;
+    const cam = st ? PC.shiftCamelot(x.camelot, st) : x.camelot;
+    const key = cam ? `${cam} · ${st ? PC.CAMELOT_KEYS[cam] || '' : x.key}` : '';
+    return [bpm ? `${bpm} BPM${Math.abs(rate - 1) > 0.0005 ? ` (${Math.round(x.bpm * 10) / 10})` : ''}` : '', key, st ? `${st > 0 ? '+' : ''}${st} st` : ''].filter(Boolean).join(' · ');
+  };
+  // The Speed slider glides to a key shift's speed (switched on for it; off again when a later shift
+  // brings it back to 100 % and DJ mode had switched it on).
+  let speedAnim = 0, djSpeedOn = false;
+  function glideSpeed(rate, ms = 900) {
+    cancelAnimationFrame(speedAnim);
+    const box = $('lp-speed-on'), sl = $('lp-speed');
+    const from = speedRate(), to = Math.max(0.5, Math.min(4, rate));
+    if (Math.abs(from - to) < 0.0005) return;
+    if (!box.checked) { box.checked = true; djSpeedOn = true; sl.value = '0'; }
+    const t0 = performance.now(), p0 = (from - 1) * 100, p1 = (to - 1) * 100;
+    const step = (t) => {
+      const x = Math.min(1, (t - t0) / ms), e = x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2;
+      sl.value = String(p0 + (p1 - p0) * e);
+      paintSpeed();
+      if (x < 1) { speedAnim = requestAnimationFrame(step); return; }
+      sl.value = String(p1);
+      if (Math.abs(p1) < 0.05 && djSpeedOn) { box.checked = false; djSpeedOn = false; }
+      paintSpeed();
+      saveSpeed();
+      if (!mix) applySpeed();
+      djPaint();
+    };
+    speedAnim = requestAnimationFrame(step);
+  }
+  function djPaint() {
+    const b = $('lp-dj');
+    b.classList.toggle('on', dj.on);
+    b.setAttribute('aria-pressed', String(dj.on));
+    // The playing song's tempo and key, DJ mode on or off (as it's heard: Speed and pitch included).
+    const line = $('lp-np-dj');
+    if (current) {
+      const a = djGet(current);
+      // Mixing in: the tempo it's held at (stretched to the outgoing song's), and the key it's shifted to.
+      line.textContent = mix ? `Mixing in${a ? ` · ${djTag(a, mix.toSpeed * mix.toStretch, mix.toSpeed)}` : ''}`
+        : a ? djTag(a) : djPending(current) ? 'Finding the tempo and key…' : '';
+      // DJ mode: the songs it may pick from are analysed ahead (main.js does one at a time).
+      if (dj.on) for (const t of queue.slice(qi + 1, qi + 1 + (dj.pick && shuffle ? PICK_N : 1))) djGet(t);
+    } else line.textContent = '';
+    line.classList.toggle('hidden', !line.textContent);
+    if (djPop) paintDjPop();
+  }
+  // The DJ button: a pop-up with on / off, the crossfade's length, matching and picking. D toggles.
+  let djPop = null;
+  function paintDjPop() {
+    const p = djPop;
+    p.querySelector('.lp-dj-on').checked = dj.on;
+    p.querySelector('.lp-dj-len').value = String(dj.fade);
+    paintStretch();
+    p.querySelector('.lp-dj-lenv').textContent = `${dj.fade} s`;
+    p.querySelector('.lp-dj-match').checked = dj.match;
+    p.querySelector('.lp-dj-pick').checked = dj.pick;
+    p.querySelector('.lp-dj-cut').checked = dj.cut;
+    p.querySelector('.lp-dj-lock').checked = dj.lock;
+    p.querySelector('.lp-dj-cutby').value = dj.cutBy;
+    p.querySelector('.lp-dj-cutby').disabled = !dj.cut;
+    p.querySelector('.lp-dj-shift').checked = dj.shift;
+    p.querySelector('.lp-dj-fx').value = dj.fx;
+    p.querySelector('.lp-dj-eng').value = dj.engine;
+    const st = p.querySelector('.lp-dj-st');
+    st.textContent = '';
+    // Label | value rows; a row without a label continues the one above.
+    const row = (k, v, cls = '') => { st.append(el('span', 'k', k), el('span', `v${cls ? ` ${cls}` : ''}`, v)); };
+    const keyOf = (cam, name) => (cam ? `${cam} ${name || PC.CAMELOT_KEYS[cam] || ''}`.trim() : '');
+    const bpmOf = (x) => `${Math.round(x * 10) / 10} BPM`;
+    const sgn = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
+    // The tempo and key you hear (a shift on Speed included), else why there's none.
+    const heard = (t, x, rate, pitchRate = rate) => {
+      if (!x) return djPending(t) ? (t.stream ? 'Fetching and analysing…' : 'Analysing…') : t.stream ? 'Analysed once fetched' : '—';
+      const sm = semisOf(pitchRate), st1 = Math.abs(sm - Math.round(sm)) < 0.03 ? Math.round(sm) : 0;
+      const cam = st1 ? PC.shiftCamelot(x.camelot, st1) : x.camelot;
+      return [x.bpm ? bpmOf(x.bpm * rate) : '', keyOf(cam, st1 ? '' : x.key), st1 ? `${sgn(st1)} st` : ''].filter(Boolean).join(' · ');
+    };
+    if (!dj.on) { row('', 'Off: songs change without a gap.', 'dim'); return; }
+    if (!current) { row('', 'Play something to start mixing.', 'dim'); return; }
+    const a = djGet(current), nx = queue[qi + 1], b = nx ? djGet(nx) : null;
+    row('Now', heard(current, a, speedRate() * stretch, dj.lock ? speedRate() : speedRate() * stretch));
+    if (!nx) return;
+    row('Next', heard(nx, b, 1)); // as recorded
+    if (!a || !b) return;
+    const fit = dj.shift && a.camelot && b.camelot ? PC.keyFit(a, semisOf(speedRate()), b, { shifter: !dj.lock || shifterOK(), stretch: stretchMax(), tempo: speedRate() * stretch }) : null;
+    const aa = withAction(current, a), bb = withAction(nx, b);
+    const pl = PC.mixPlan(aa, bb, { fade: dj.fade, match: dj.match, cut: dj.cut, fit });
+    const keyWord = (kd) => (kd == null ? '' : kd === 0 ? 'same key' : kd === 1 ? 'keys fit' : 'keys clash');
+    if (fit) {
+      const r = 2 ** (fit.k / 12);
+      const tempo = fit.matched ? bpmOf(a.bpm * speedRate() * stretch) : bpmOf(b.bpm * r);
+      row('', fit.k ? `→ ${sgn(fit.k)} st: ${tempo} · ${keyOf(fit.camelot)}` : `→ its own key: ${keyOf(fit.camelot)}`, 'hi');
+      // The Stretch it'll take: its tempo (the playing song's) over its key shift's speed.
+      const str = fit.matched ? (fit.rel * speedRate() * stretch) / r : 1;
+      row('', [keyWord(fit.kd), fit.matched ? `beats held · Stretch ${Math.round(str * 1000) / 10} %` : 'tempos apart, so no beat match'].filter(Boolean).join(' · '), 'dim');
+    } else {
+      const tm = dj.match ? PC.tempoMatch(a, b, stretchMax()) : null;
+      const tempo = tm ? `tempo matched${Math.abs(tm.rate - 1) > 0.001 ? ` (${Math.round(tm.rate * 1000) / 10} %)` : ''}` : !dj.match ? 'crossfade only' : 'tempos too far apart to match';
+      row('', [tempo, keyWord(PC.camelotDist(a.camelot, b.camelot))].filter(Boolean).join(' · '), 'dim');
+    }
+    const fxk = dj.fx === 'auto' ? (pl.matched ? 'off' : 'brake') : dj.fx;
+    const fxName = { brake: 'brake', stutter: 'stutter' }[fxk];
+    row('Mix', `at ${fmtTime(pl.outAt)}${pl.cutOut ? ` · skips ${fmtTime(pl.cutOut)} of outro` : ''}${fxName ? ` · goes out ${fxName}` : ''}`);
+    const by = bb && bb.action && bb.action.by === 'lyrics' ? (dj.cutBy === 'chorus' ? 'the chorus' : 'the vocals') : 'the action';
+    row('', `next from ${fmtTime(pl.inAt)}${pl.cutIn ? ` · straight to ${by}` : dj.cut && !pl.matched ? ' · its intro (beats not matched)' : ''}`, 'dim');
+    if (dj.cut && dj.cutBy !== 'loud' && nx && !djLyricsOf(nx)) djLyricsOf(nx);
+  }
+  function toggleDjPop() {
+    if (djPop) { closeDjPop(); return; }
+    const p = el('div', 'lp-dj-pop');
+    p.setAttribute('role', 'dialog');
+    p.setAttribute('aria-label', 'DJ mode');
+    p.innerHTML = `<label class="lp-dj-row head"><input type="checkbox" class="lp-dj-on"> <b>DJ mode</b><span class="k">D</span></label>
+      <label class="lp-dj-row col"><span>Crossfade <em class="lp-dj-lenv"></em></span><input type="range" class="lp-dj-len" min="2" max="32" step="1" aria-label="Crossfade length"></label>
+      <label class="lp-dj-row col"><span>Stretch <em class="lp-dj-strv"></em></span><input type="range" class="lp-dj-str" min="-30" max="30" step="0.1" aria-label="Stretch: the playing song's tempo" title="The playing song's tempo, on top of Speed (Speed is left alone). DJ mode sets it to match a song's tempo. Double-click: 100 %"></label>
+      <label class="lp-dj-row"><input type="checkbox" class="lp-dj-lock"> Key lock: Stretch keeps the pitch (else it's like a turntable: cleanest sound, pitch follows; matches within ±3 %)</label>
+      <label class="lp-dj-row"><input type="checkbox" class="lp-dj-match"> Match the tempo and beats (on Stretch)</label>
+      <label class="lp-dj-row"><input type="checkbox" class="lp-dj-shift"> Shift the next song into key (−5 to +8 semitones, on Speed)</label>
+      <label class="lp-dj-row"><input type="checkbox" class="lp-dj-cut"> Cut to the action (skip long intros and outros)</label>
+      <label class="lp-dj-row sub">Go straight to <select class="lp-dj-cutby" aria-label="Cut to"><option value="vocals">the first vocals</option><option value="chorus">the first chorus</option><option value="loud">where it gets loud</option></select></label>
+      <label class="lp-dj-row sel">Transition <select class="lp-dj-fx" aria-label="Transition effect">${DJ_FX.map(([v, t, tip]) => `<option value="${v}" title="${tip}">${t}</option>`).join('')}</select></label>
+      <label class="lp-dj-row sel">Key shift <select class="lp-dj-eng" aria-label="Key-shift engine">${DJ_ENGINES.map(([v, t, tip]) => `<option value="${v}" title="${tip}">${t}</option>`).join('')}</select></label>
+      <label class="lp-dj-row"><input type="checkbox" class="lp-dj-pick"> When shuffling, play next what goes best (tempo and key)</label>
+      <button type="button" class="lp-dj-reroll" title="Shuffle the songs still to come (turns Shuffle on); with the option above on, the best of the new next 20 plays next.">⟳ Reroll the queue</button>
+      <div class="lp-dj-st"></div>`;
+    p.querySelector('.lp-dj-on').addEventListener('change', (e) => setDj(e.target.checked));
+    p.querySelector('.lp-dj-len').addEventListener('input', (e) => { dj.fade = Number(e.target.value); djSave(); paintDjPop(); });
+    const strSl = p.querySelector('.lp-dj-str');
+    strSl.addEventListener('input', () => { clearInterval(stretchGlide); setStretch(1 + Number(strSl.value) / 100); });
+    strSl.addEventListener('dblclick', () => { clearInterval(stretchGlide); strSl.value = '0'; setStretch(1); });
+    p.querySelector('.lp-dj-match').addEventListener('change', (e) => { dj.match = e.target.checked; djSave(); paintDjPop(); });
+    p.querySelector('.lp-dj-pick').addEventListener('change', (e) => { dj.pick = e.target.checked; djSave(); paintDjPop(); });
+    p.querySelector('.lp-dj-cut').addEventListener('change', (e) => { dj.cut = e.target.checked; djSave(); paintDjPop(); });
+    p.querySelector('.lp-dj-lock').addEventListener('change', (e) => {
+      dj.lock = e.target.checked;
+      djSave();
+      if (mix && mix.el === audio) setRate(audio, mix.toSpeed, mix.toStretch); else setRate(audio, speedRate(), stretch);
+      paintDjPop();
+      djPaint();
+    });
+    p.querySelector('.lp-dj-reroll').addEventListener('click', djReroll);
+    p.querySelector('.lp-dj-cutby').addEventListener('change', (e) => { dj.cutBy = ['vocals', 'chorus', 'loud'].includes(e.target.value) ? e.target.value : 'vocals'; djSave(); paintDjPop(); });
+    p.querySelector('.lp-dj-shift').addEventListener('change', (e) => { dj.shift = e.target.checked; djSave(); paintDjPop(); });
+    const reRate = () => { for (const [m, args] of elRate) if (m === audio || (mix && m === mix.el)) setRate(m, ...args); };
+    p.querySelector('.lp-dj-fx').addEventListener('change', (e) => { dj.fx = DJ_FX.some((x) => x[0] === e.target.value) ? e.target.value : 'auto'; djSave(); paintDjPop(); });
+    p.querySelector('.lp-dj-eng').addEventListener('change', (e) => { dj.engine = DJ_ENGINES.some((x) => x[0] === e.target.value) ? e.target.value : 'auto'; djSave(); reRate(); paintDjPop(); });
+    document.body.append(p);
+    djPop = p;
+    paintDjPop();
+    const r = $('lp-dj').getBoundingClientRect();
+    p.style.left = `${Math.max(8, Math.min(window.innerWidth - p.offsetWidth - 8, r.left + r.width / 2 - p.offsetWidth / 2))}px`;
+    p.style.bottom = `${window.innerHeight - r.top + 8}px`;
+    $('lp-dj').setAttribute('aria-expanded', 'true');
+    p.querySelector('.lp-dj-on').focus();
+  }
+  function closeDjPop() { if (!djPop) return; djPop.remove(); djPop = null; $('lp-dj').setAttribute('aria-expanded', 'false'); }
+  $('lp-dj').addEventListener('click', toggleDjPop);
+  document.addEventListener('mousedown', (e) => { if (djPop && !e.target.closest('.lp-dj-pop, #lp-dj')) closeDjPop(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && djPop) { e.stopPropagation(); closeDjPop(); $('lp-dj').focus(); } }, true);
+  djPaint();
 
   // ---------- Gapless ----------
   // A few seconds into a song, the next one (your own file, no video showing) is loaded on the other
@@ -867,28 +1476,44 @@
   }
   function preloadSoon() { clearTimeout(preTimer); preTimer = setTimeout(preloadNext, 3000); }
   async function preloadNext() {
+    if (mix) { preloadSoon(); return; } // the other player is still fading out
+    if (dj.on && djPickNext() === 'wait') { preloadSoon(); return; }
     const i = qi + 1, t = queue[i];
     if (pre && pre.i === i && pre.t === t) return;
     dropPre();
-    if (repeat === 'one' || !PC.canGapless(current, t, { videoShown: videoOn }) || videoFor(t)) return;
+    if (repeat === 'one' || !t) return;
+    // Songs from the Music Downloader (playing or next) are mixed in DJ mode, from their fetched copy.
+    const streamy = !!(current && current.stream) || !!t.stream;
+    if (streamy) { if (!dj.on || videoOn || t.playable === false || !window.PlayerFx || !window.PlayerFx.routed()) return; }
+    else if (!PC.canGapless(current, t, { videoShown: videoOn }) || videoFor(t)) return;
     const el = idleEl(), seq = loadSeq;
-    let url = null;
-    if (window.PlayerFx && window.PlayerFx.routed()) url = await window.api.mediaUrl(t.path).catch(() => null);
-    if (seq !== loadSeq || queue[i] !== t) return;
+    let url = null, skey = null;
+    if (t.stream) {
+      const r = await streamAhead(t);
+      if (!r || !r.src) return;
+      url = r.src;
+      skey = r.key;
+    } else if (window.PlayerFx && window.PlayerFx.routed()) url = await window.api.mediaUrl(t.path).catch(() => null);
+    if (seq !== loadSeq || queue[i] !== t || mix) return;
     if (url) el.crossOrigin = 'anonymous'; else { el.removeAttribute('crossorigin'); url = fileUrl(t.path); }
     el.src = url;
     el.load();
-    pre = { el, t, i };
+    if (window.PlayerFx && window.PlayerFx.level) { window.PlayerFx.level(el, 1); window.PlayerFx.pitch(el, null); }
+    pre = { el, t, i, skey };
+    if (dj.on) { djGet(t); if (dj.cut && dj.cutBy !== 'loud') djLyricsOf(t); }
   }
   // A preloaded song that won't play is forgotten (it'll load the usual way).
   for (const m of mediaEls) m.addEventListener('error', () => { if (pre && pre.el === m && m !== audio) dropPre(); });
   function checkHandover() {
-    if (!pre || audio.paused || seeking || !current || current.stream) return;
+    if (!pre || audio.paused || seeking || !current || (current.stream && !dj.on)) return;
+    if (dj.on && checkMix()) return;
     if (pre.el.readyState < 3) return;
     if (PC.handoverDue(audio.currentTime, audio.duration, 0.035 * (audio.playbackRate || 1))) handover();
   }
-  function handover() {
-    const old = audio, { el, t, i } = pre;
+  function handover(mixing = null) {
+    const old = audio, { el, t, i, skey } = pre;
+    if (!mixing) { stretch = 1; clearInterval(stretchGlide); }
+    const oldKey = current && current.stream && stream ? stream.key : null;
     pre = null;
     clearTimeout(preTimer);
     loadSeq++;
@@ -898,15 +1523,38 @@
     old.classList.remove('active');
     el.classList.add('active');
     if (window.PlayerFx && window.PlayerFx.setActive) window.PlayerFx.setActive(el);
-    applySpeed();
+    // A plain change: at the Speed setting. In a DJ mix: Speed at its key shift, Stretch for its tempo.
+    if (!mixing || !mix) applySpeed();
+    else {
+      // Still silent: its rate (and the shifter, if it needs it) set; the sliders glide to show it.
+      stretch = mix.toStretch;
+      setRate(el, mix.toSpeed, mix.toStretch);
+      if (mix.plan.fitted) glideSpeed(mix.toSpeed);
+      paintStretch();
+    }
     el.play().catch(() => {});
-    // The old one stops a moment later (its last few milliseconds overlap rather than leave a gap).
-    setTimeout(() => { if (old !== audio) { old.pause(); old.removeAttribute('src'); old.load(); } }, 80);
+    // The old one stops a moment later (its last few milliseconds overlap rather than leave a gap);
+    // in a DJ mix it plays on, fading out.
+    if (!mixing) setTimeout(() => { if (old !== audio) { old.pause(); old.removeAttribute('src'); old.load(); } }, 80);
     qi = i;
     current = t;
-    curSrc = t.path;
+    curSrc = t.stream ? el.src : t.path;
     songStarted(t);
+    // A song from the Music Downloader: playing from its fetched copy (whole on this PC). The one before
+    // keeps its file while the mix still plays it.
+    if (window.api.streamAdopt && (t.stream || oldKey)) {
+      if (oldKey && mixing) { window.api.streamHold(oldKey, true).catch(() => {}); if (mix) mix.heldKey = oldKey; }
+      window.api.streamAdopt(t.stream ? skey : null).catch(() => {});
+    }
+    if (t.stream) {
+      stream = { key: skey, cachedNow: true, retried: false, replaced: false };
+      setStreamState('Cached', 'cached');
+      loadWave(t);
+      prefetchNext();
+    }
     paintVideo();
+    // A streamed song fetched ahead without its details: looked up with what it has.
+    if (t.stream && !t.detailsIn) { t.detailsIn = true; loadLyrics(t); }
     loadLoop(t);
     paintBar();
     preloadSoon();
@@ -922,6 +1570,8 @@
   let playDownload = true;
   window.api.settingsGet().then((st) => { playDownload = st.playDownload !== false; }).catch(() => {});
   if (window.api.onSettings) window.api.onSettings((st) => { if ('playDownload' in st) playDownload = st.playDownload !== false; });
+  let failRun = 0; // songs in a row that couldn't play
+  onMedia('playing', () => { failRun = 0; });
   // at: start from there; fresh: look the song up again (its address expired); play: start playing.
   async function openStream(t, seq, { at = 0, fresh = false, play = true } = {}) {
     setStreamState(playDownload ? 'Downloading' : 'Loading', 'loading');
@@ -929,21 +1579,34 @@
     try {
       s = await window.api.streamOpen(t.url, null, { fresh, meta: { title: t.title, artist: t.artist, duration: t.duration } });
     } catch (e) {
-      if (seq === loadSeq) streamFail(String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
+      if (seq !== loadSeq) return;
+      const msg = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+      t.unplayable = msg;
+      // Playing on: the next song in a few seconds (up to 5 in a row, so a dead queue doesn't spin).
+      const more = play && (qi + 1 < queue.length || repeat === 'all') && failRun < 5;
+      streamFail(more ? `${msg} Skipping…` : msg);
+      if (more) { failRun++; setTimeout(() => { if (seq === loadSeq && current === t) next(); }, 2500); }
       return;
     }
     if (seq !== loadSeq) return;
+    failRun = 0;
     // Fill gaps (a pasted link or an album track) with what the lookup found.
-    if (s.meta) {
-      let more = false;
-      for (const k of ['title', 'artist', 'album', 'thumbnail', 'duration']) if (!t[k] && s.meta[k]) { t[k] = s.meta[k]; more = true; }
+    if (s.meta || s.art) {
+      let more = streamDetails(t, s.meta, s.art);
       if (more) { paintNow(); mediaMeta(t); }
     }
-    stream = { key: s.key, cachedNow: !!(s.cached || s.local), retried: fresh, replaced: !!s.replaced };
+    // Now its artist and details are known: the lyrics and the loop (music video) are looked up.
+    const fresh0 = !t.detailsIn;
+    t.detailsIn = true;
+    if (fresh0 || lyricsFor !== t) loadLyrics(t);
+    loadLoop(t);
+    stream = { key: s.key, cachedNow: !!(s.cached || s.local), retried: fresh, replaced: s.replaced || false };
+    if (dj.on) djGet(t);
     if (stream.cachedNow && !wave) loadWave(t);
     setStreamState(s.local ? 'Local file' : s.cached ? 'Cached' : 'Streaming', s.local ? 'local' : s.cached ? 'cached' : 'stream');
     curSrc = s.src;
     audio.crossOrigin = 'anonymous'; // the stream server allows it, so the effects can read it
+    if (window.PlayerFx && window.PlayerFx.pitch) window.PlayerFx.pitch(audio, null);
     audio.src = s.src;
     applySpeed();
     if (at) audio.addEventListener('loadedmetadata', () => { try { audio.currentTime = Math.min(at, (audio.duration || at) - 0.5); } catch { /* not ready */ } }, { once: true });
@@ -951,6 +1614,24 @@
     paintBar();
     prefetchNext();
   }
+  // Gaps in a streamed song's details filled from the lookup (or what was kept when it was cached), and
+  // its picture as kept on this PC. → whether anything changed.
+  function streamDetails(t, meta, art) {
+    let more = false;
+    if (meta) for (const k of ['title', 'artist', 'album', 'thumbnail', 'duration', 'year', 'genre']) if (!t[k] && meta[k]) { t[k] = meta[k]; more = true; }
+    if (art && t.art !== art) { t.art = art; more = true; }
+    if (more && t === current) dcPush(); // Discord: the year (and the rest) once known
+    return more;
+  }
+  // Saved as it cached (main.js): the details and the picture, for the song playing or the next one.
+  if (window.api.onStreamMeta) window.api.onStreamMeta(({ key, meta, art }) => {
+    for (const t of [current, ...queue.slice(qi + 1, qi + 1 + AHEAD)]) {
+      if (!t || !t.stream || streamKeyOf(t) !== key) continue;
+      if (!streamDetails(t, meta, art)) continue;
+      if (t === current) { paintNow(); mediaMeta(t); }
+      if (!$('lp-un-pop').classList.contains('hidden')) paintQueue();
+    }
+  });
   let streamKind = '';
   function setStreamState(text, kind) {
     streamKind = kind;
@@ -958,7 +1639,8 @@
       local: 'Downloaded to a temporary file before playing; deleted when the song changes' }[kind] || '';
     if (stream && stream.replaced && ['stream', 'cached', 'local'].includes(kind)) {
       label = 'Via YT Music';
-      tip = "SoundCloud's copy is DRM-protected, so this plays the same song from YouTube Music.";
+      tip = stream.replaced.why === 'blocked' ? "SoundCloud won't play this track here (blocked in your country, private or removed), so this plays the same song from YouTube Music."
+        : "SoundCloud's copy is DRM-protected, so this plays the same song from YouTube Music.";
     }
     $('lp-bar-state').textContent = label;
     $('lp-bar-state').title = tip;
@@ -972,16 +1654,41 @@
     paintBar();
   }
   let prefetchTimer = 0;
+  // The next 10 songs from the Music Downloader are fetched ahead, one after another (downloaded whole,
+  // or saved to the cache), each with its details and picture; the next one first. Songs that leave
+  // those 10 (the queue changed) lose their temporary files.
+  const AHEAD = 10;
+  let aheadGen = 0;
   function prefetchNext() {
     clearTimeout(prefetchTimer);
-    const nx = queue[qi + 1];
-    if (nx && nx.stream) prefetchTimer = setTimeout(() => window.api.streamPrefetch(nx.url, null).catch(() => {}), 1500);
+    const gen = ++aheadGen;
+    const list = queue.slice(qi + 1, qi + 1 + AHEAD).filter((t) => t && t.stream && t.url);
+    if (window.api.streamKeepAhead) window.api.streamKeepAhead(list.map((t) => t.url)).catch(() => {});
+    if (!list.length) return;
+    prefetchTimer = setTimeout(async () => {
+      for (let i = 0; i < list.length; i++) {
+        if (gen !== aheadGen) return;
+        const t = list[i];
+        // Already fetched this session: asked again (quick, no lookup) in case its file was dropped.
+        const known = streamKeys.has(t.url);
+        if (known) streamKeys.delete(t.url);
+        const r = await streamAhead(t);
+        if (gen !== aheadGen) return;
+        if (i === 0 && r && dj.on) { djGet(t); if (!pre) preloadSoon(); }
+        if (r && !$('lp-un-pop').classList.contains('hidden')) paintQueue();
+        // A site refused (SoundCloud limits lookups in a row): the rest wait for the next song.
+        if (!r) return;
+        // New lookups spaced out (SoundCloud answers a burst of them with 403 for a while).
+        if (!known && i + 1 < list.length) await new Promise((ok) => setTimeout(ok, 5000));
+      }
+    }, 1500);
   }
   window.api.onStreamProgress(({ url, percent }) => {
     if (!current || !current.stream || current.url !== url || streamKind !== 'loading') return;
     setStreamState(percent == null ? 'Downloading' : `Downloading ${percent}%`, 'loading');
   });
   window.api.onStreamCached((key) => {
+    if (dj.on) for (const t of [current, queue[qi + 1]]) if (t && t.stream && streamKeyOf(t) === key) djGet(t);
     if (!stream || key !== stream.key) return;
     stream.cachedNow = true;
     if (streamKind === 'stream') setStreamState('Cached', 'cached');
@@ -991,6 +1698,7 @@
   onMedia('playing', () => { if (current && current.stream && streamKind === 'stream') $('lp-bar-state').textContent = 'Streaming'; });
   // Seeking: a song still arriving can't jump ahead yet; once it's cached, it reloads there.
   function seekTo(time) {
+    if (guest) { const d = guest.duration(); guest.seek(Math.max(0, d ? Math.min(d, time) : time)); paintTime(); return; }
     if (!current) return;
     const d = audio.duration || current.duration || 0;
     time = Math.max(0, d ? Math.min(d - 0.2, time) : time);
@@ -1052,7 +1760,9 @@
   });
   // Stop and close: the play bar goes (in the Toolbox) and any temporary song files are deleted.
   function closePlayer() {
+    if (guest) { const g = guest; detachGuest(g); g.pause(); if (!current) return; }
     const hadStream = queue.some((x) => x.stream);
+    cancelMix();
     dropPre();
     loadSeq++;
     audio.pause();
@@ -1063,6 +1773,7 @@
     saveSession();
     if (hadStream) window.api.streamRelease().catch(() => {});
     if ('mediaSession' in navigator) navigator.mediaSession.metadata = null;
+    mediaSync();
     paintNow();
     paintVideo();
     showBar();
@@ -1070,21 +1781,22 @@
   $('lp-close').addEventListener('click', closePlayer);
   // The play bar: always in Player mode; in the Toolbox while something is loaded.
   function showBar() {
-    const on = mode === 'player' || !!current;
+    const on = mode === 'player' || !!current || !!guest;
     $('lp-bar').classList.toggle('hidden', !on);
     document.body.classList.toggle('lp-on', on);
   }
-  onMedia('play', paintBar);
+  onMedia('play', () => { if (guest) { const g = guest; detachGuest(g); g.pause(); } paintBar(); });
   onMedia('pause', paintBar);
   onMedia('timeupdate', () => { paintTime(); syncLyrics(); checkHandover(); });
   onMedia('loadedmetadata', paintTime);
   $('lp-play').addEventListener('click', toggle);
   function toggle() {
+    if (guest) { guest.toggle(); return; }
     if (!current) { if (shown.length) playFrom(0); return; }
     if (audio.paused) audio.play().catch(() => {}); else audio.pause();
   }
-  $('lp-next').addEventListener('click', next);
-  $('lp-prev').addEventListener('click', prev);
+  $('lp-next').addEventListener('click', () => { if (!guest) skipNext(); });
+  $('lp-prev').addEventListener('click', () => { if (guest) seekTo(0); else prev(); });
   $('lp-playall').addEventListener('click', () => { shuffle = false; paintShuffle(); playFrom(0); });
   $('lp-shuffleall').addEventListener('click', () => { shuffle = true; paintShuffle(); playFrom(Math.floor(Math.random() * shown.length)); });
   $('lp-shuffle').addEventListener('click', () => {
@@ -1100,17 +1812,42 @@
     }
   });
   function paintShuffle() { $('lp-shuffle').classList.toggle('on', shuffle); $('lp-shuffle').setAttribute('aria-pressed', String(shuffle)); }
+  // Windows' media controls: the keyboard's media keys (held by Nabbit while a song is loaded; main.js)
+  // and the taskbar thumbnail's buttons come in here; the media overlay and headphone buttons through
+  // the media session below. A key seen both ways counts once.
+  let keyAt = 0;
+  const once = (fn) => (...a) => { if (performance.now() - keyAt < 400) return; fn(...a); };
+  function mediaSync() { // (a function declaration, its state on itself: paintBar may run before this line)
+    const has = !!current || !!guest, playing = guest ? guest.playing() : has && !audio.paused;
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = !has ? 'none' : playing ? 'playing' : 'paused';
+    const k = `${has}|${playing}`;
+    if (k === mediaSync.sent || !window.api.mediaState) return;
+    mediaSync.sent = k;
+    window.api.mediaState({ has, playing }).catch(() => {});
+  }
+  if (window.api.onMediaKey) {
+    window.api.onMediaKey((k) => {
+      keyAt = performance.now();
+      if (k === 'playpause') toggle();
+      else if (k === 'next') { if (current) skipNext(); }
+      else if (k === 'prev') { if (current) prev(); }
+      else if (k === 'stop') { if (current && !audio.paused) audio.pause(); }
+    });
+  }
   if ('mediaSession' in navigator) {
-    navigator.mediaSession.setActionHandler('play', toggle);
-    navigator.mediaSession.setActionHandler('pause', toggle);
-    navigator.mediaSession.setActionHandler('nexttrack', next);
-    navigator.mediaSession.setActionHandler('previoustrack', prev);
+    navigator.mediaSession.setActionHandler('play', once(toggle));
+    navigator.mediaSession.setActionHandler('pause', once(toggle));
+    navigator.mediaSession.setActionHandler('nexttrack', once(skipNext));
+    navigator.mediaSession.setActionHandler('previoustrack', once(prev));
     try { navigator.mediaSession.setActionHandler('seekto', (d) => seekTo(d.seekTime)); } catch { /* older */ }
   }
+  // Settings live in the Toolbox: the gear switches to it first (then opens them as usual).
+  for (const g of document.querySelectorAll('.settings-tab')) g.addEventListener('click', () => { if (mode === 'player') setMode('toolbox'); }, true);
+
   // ---------- Keyboard (Player mode; not while typing in a box) ----------
   const KEYS = [
     ['Space', 'Play / pause'], ['← →', '5 seconds back / on'], ['Shift + ← →', 'Previous / next song'],
-    ['↑ ↓', 'Volume up / down'], ['M', 'Mute'], ['S', 'Shuffle'], ['R', 'Repeat: off, all, this song'],
+    ['↑ ↓', 'Volume up / down'], ['M', 'Mute'], ['S', 'Shuffle'], ['R', 'Repeat: off, all, this song'], ['D', 'DJ mode'],
     ['Q', 'Up next (the queue)'], ['V', 'Video / loop on the cover'], ['Ctrl + F', 'Filter the library'], ['?', 'These keys'],
   ];
   function showKeys() {
@@ -1126,6 +1863,14 @@
     box.addEventListener('click', () => box.remove());
     document.body.append(box);
   }
+  // A clicked button would act on Space as the key comes up (after it played / paused): not that one.
+  // (Decided as the key goes down: by the time it's up, the browser counts the button as keyboard-focused.)
+  let spaceTaken = false;
+  // How the focus got there: a click (pointer) or the keyboard (Tab, arrows).
+  let byPointer = false;
+  document.addEventListener('pointerdown', () => { byPointer = true; }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Tab' || e.key.startsWith('Arrow')) byPointer = false; }, true);
+  document.addEventListener('keyup', (e) => { if (e.code === 'Space' && spaceTaken) { spaceTaken = false; e.preventDefault(); } }, true);
   const volBy = (d) => { const v = Math.max(0, Math.min(100, Number($('lp-vol').value) + d)); $('lp-vol').value = String(v); $('lp-vol').dispatchEvent(new Event('input')); };
   document.addEventListener('keydown', (e) => {
     if (mode !== 'player' || e.defaultPrevented) return;
@@ -1137,15 +1882,23 @@
     if (ctrl || e.altKey) return;
     if (k === 'Escape') { const kb = document.querySelector('.lp-keys'); if (kb) { kb.remove(); e.preventDefault(); } return; }
     let done = true;
-    if (e.code === 'Space') { if (a && a.tagName === 'BUTTON') return; toggle(); }
+    // Space plays / pauses, even after clicking a button (which keeps the focus); a button reached with
+    // the keyboard (Tab) still takes it.
+    if (e.code === 'Space') {
+      if (a && a.tagName === 'BUTTON' && !byPointer) return; // reached with the keyboard: the button's
+      e.preventDefault();
+      spaceTaken = !!(a && a.tagName === 'BUTTON');
+      if (!e.repeat) toggle();
+    }
     else if (k === 'ArrowLeft' || k === 'ArrowRight') {
       if (!current) return;
       const fwd = k === 'ArrowRight';
-      if (e.shiftKey) { if (fwd) next(); else prev(); } else seekTo(audio.currentTime + (fwd ? 5 : -5));
+      if (e.shiftKey) { if (fwd) skipNext(); else prev(); } else seekTo(audio.currentTime + (fwd ? 5 : -5));
     } else if (k === 'ArrowUp' || k === 'ArrowDown') volBy(k === 'ArrowUp' ? 5 : -5);
     else if (k === 'm' || k === 'M') $('lp-mute').click();
     else if (k === 's' || k === 'S') $('lp-shuffle').click();
     else if (k === 'r' || k === 'R') $('lp-repeat').click();
+    else if (k === 'd' || k === 'D') setDj(!dj.on);
     else if (k === 'q' || k === 'Q') toggleQueue();
     else if (k === 'v' || k === 'V') { if (!$('lp-vtoggle').classList.contains('hidden')) $('lp-vtoggle').click(); }
     else if (k === '?') showKeys();
@@ -1155,13 +1908,16 @@
 
   // Seek, volume, speed
   let seeking = false;
-  $('lp-seek').addEventListener('input', () => { seeking = true; $('lp-t0').textContent = fmtTime((Number($('lp-seek').value) / 1000) * (audio.duration || 0)); drawWave(); });
-  $('lp-seek').addEventListener('change', () => { const d = audio.duration || (current && current.duration) || 0; seeking = false; if (d) seekTo((Number($('lp-seek').value) / 1000) * d); });
+  // What the bar shows: the player's song, or a guest's (another tool playing through the bar).
+  const barDur = () => (guest ? guest.duration() : audio.duration || (current && current.duration) || 0);
+  const barTime = () => (guest ? guest.time() : audio.currentTime);
+  $('lp-seek').addEventListener('input', () => { seeking = true; $('lp-t0').textContent = fmtTime((Number($('lp-seek').value) / 1000) * barDur()); drawWave(); });
+  $('lp-seek').addEventListener('change', () => { const d = barDur(); seeking = false; if (d) seekTo((Number($('lp-seek').value) / 1000) * d); });
   function paintTime() {
-    const d = audio.duration || (current && current.duration) || 0;
+    const d = barDur();
     if (!seeking) {
-      $('lp-t0').textContent = fmtTime(audio.currentTime);
-      $('lp-seek').value = String(d ? Math.round((audio.currentTime / d) * 1000) : 0);
+      $('lp-t0').textContent = fmtTime(barTime());
+      $('lp-seek').value = String(d ? Math.round((barTime() / d) * 1000) : 0);
     }
     $('lp-t1').textContent = fmtTime(d);
     drawWave();
@@ -1183,14 +1939,27 @@
     waveKey = '';
     drawWave(true);
   }
+  // Beat grids set by hand (Audio Tools → Change pitch and tempo → Beat grid), by path, kept.
+  let grids = null;
+  function gridOf(p) {
+    if (!grids) { try { grids = JSON.parse(localStorage.getItem('nabbit.grids') || '{}'); } catch { grids = {}; } }
+    const g = grids[String(p).toLowerCase()];
+    return g && g.bpm > 0 ? g : null;
+  }
   function drawWave(force = false) {
     const c = $('lp-wave');
     const w = c.clientWidth, h = c.clientHeight;
     if (!w || !h) return;
-    const d = audio.duration || (current && current.duration) || 0;
-    const frac = seeking ? Number($('lp-seek').value) / 1000 : d ? Math.min(1, audio.currentTime / d) : 0;
+    const d = barDur();
+    const frac = seeking ? Number($('lp-seek').value) / 1000 : d ? Math.min(1, barTime() / d) : 0;
     const dpr = window.devicePixelRatio || 1;
-    const key = `${w}|${h}|${dpr}|${Math.round(frac * w * dpr)}|${!!wave}|${document.documentElement.className}`;
+    const shape = guest ? guest.wave : wave;
+    // The beat grid (4/4: a line every beat, stronger every bar), from the song's tempo and first beat.
+    const own = !guest && current && !current.stream ? gridOf(current.path) : null;
+    // The analysis (tempo, key) only runs in DJ mode; otherwise a grid from one already done.
+    const an = !guest && current && !own ? (dj.on ? djGet(current) : djPeek(current)) : null;
+    const grid = own && d > 0 ? { bpm: own.bpm, first: own.offset } : an && an.bpm > 0 && d > 0 ? { bpm: Math.round(an.bpm), first: an.offset || 0 } : null;
+    const key = `${w}|${h}|${dpr}|${Math.round(frac * w * dpr)}|${!!shape}|${!!guest}|${grid ? grid.bpm : 0}|${document.documentElement.className}`;
     if (!force && key === waveKey) return;
     waveKey = key;
     if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
@@ -1201,7 +1970,7 @@
     const red = cs.getPropertyValue('--red').trim() || '#ff2a1f', muted = cs.getPropertyValue('--muted').trim() || '#888', text = cs.getPropertyValue('--text').trim() || '#eee';
     const BW = 2, GAP = 1, n = Math.max(1, Math.floor((w + GAP) / (BW + GAP)));
     const px = frac * w;
-    const bars = PC.waveBars(wave, n);
+    const bars = PC.waveBars(shape, n);
     for (let i = 0; i < n; i++) {
       const v = bars[i];
       const bh = Math.max(2, Math.round(v * (h - 2)));
@@ -1212,7 +1981,20 @@
       g.fillRect(x, Math.round((h - bh) / 2), BW, bh);
     }
     g.globalAlpha = 1;
-    if (current) { g.fillStyle = text; g.fillRect(Math.min(w - 1, Math.max(0, Math.round(px))), 0, 1, h); }
+    if (grid) {
+      const beat = 60 / grid.bpm, pxBeat = (beat / d) * w;
+      g.fillStyle = text;
+      for (let k = Math.ceil(-grid.first / beat), t = grid.first + k * beat; t < d; k++, t += beat) {
+        if (t < 0) continue;
+        const bar = ((k % 4) + 4) % 4 === 0;
+        if (!bar && pxBeat < 4) continue;
+        if (bar && pxBeat * 4 < 3) continue;
+        g.globalAlpha = bar ? 0.5 : 0.22;
+        g.fillRect(Math.round((t / d) * w), bar ? 0 : Math.round(h * 0.25), 1, bar ? h : Math.round(h * 0.5));
+      }
+      g.globalAlpha = 1;
+    }
+    if (current || guest) { g.fillStyle = text; g.fillRect(Math.min(w - 1, Math.max(0, Math.round(px))), 0, 1, h); }
   }
   // Smooth while playing: redrawn when the playhead moves a pixel.
   let waveRaf = 0;
@@ -1223,15 +2005,16 @@
   // The volume comes last: after the effects when they're running (player-fx.js), else on the player itself.
   const applyVol = () => { const v = Number($('lp-vol').value) / 100; if (window.PlayerFx && window.PlayerFx.output(v * v)) audio.volume = 1; else audio.volume = v * v; };
   applyVol();
-  $('lp-vol').addEventListener('input', () => { applyVol(); audio.muted = false; paintMute(); try { localStorage.setItem('nabbit.lpVol', $('lp-vol').value); } catch { /* none */ } });
-  $('lp-mute').addEventListener('click', () => { audio.muted = !audio.muted; paintMute(); });
+  $('lp-vol').addEventListener('input', () => { applyVol(); audio.muted = false; paintMute(); guestVol(); try { localStorage.setItem('nabbit.lpVol', $('lp-vol').value); } catch { /* none */ } });
+  $('lp-mute').addEventListener('click', () => { audio.muted = !audio.muted; paintMute(); guestVol(); });
+  const guestVol = () => { if (guest && guest.volume) { const v = Number($('lp-vol').value) / 100; guest.volume(audio.muted ? 0 : v * v); } };
   // Scrolling on the play bar: volume (2 % a notch); on the position bar: 5 seconds back or forward.
   $('lp-bar').addEventListener('wheel', (e) => {
     e.preventDefault();
     const up = e.deltaY < 0;
     if (e.target === $('lp-seek') || e.target.closest('.lp-time')) {
-      if (!current) return;
-      seekTo(audio.currentTime + (up ? 5 : -5));
+      if (!current && !guest) return;
+      seekTo(barTime() + (up ? 5 : -5));
       return;
     }
     const v = Math.max(0, Math.min(100, Number($('lp-vol').value) + (up ? 2 : -2)));
@@ -1240,29 +2023,74 @@
   }, { passive: false });
   // Effects: a placeholder for now.
   function paintMute() { $('lp-mute').classList.toggle('muted', audio.muted || Number($('lp-vol').value) === 0); }
+  // Speed: like changing the sample rate (faster is higher). 1 when off.
+  function speedRate() { return $('lp-speed-on').checked ? Math.max(0.5, Math.min(4, 1 + Number($('lp-speed').value) / 100)) : 1; }
+  // Audio Tools → Change pitch and tempo: its song plays at its own pitch (semitones) and tempo, each on
+  // its own: the tempo by the player (pitch kept), the pitch by the pitch shifter (DJ mode's). Without
+  // the shifter, like a record (both together). Other songs play as usual.
+  let pt = null; // { path, semis, tempo, record }
+  const ptFor = (t) => (pt && t && !t.stream && t.path && t.path.toLowerCase() === pt.path.toLowerCase() ? pt : null);
+  function applyPt(el, p) {
+    const r = 2 ** (p.semis / 12);
+    if (window.PlayerFx && window.PlayerFx.useAlgo) window.PlayerFx.useAlgo(el, null); // Audio Tools' engine
+    if (window.PlayerFx && window.PlayerFx.timeShape) window.PlayerFx.timeShape(el, p.rt || null);
+    if (window.PlayerFx && window.PlayerFx.slices) window.PlayerFx.slices(el, p.sl || null);
+    const on = !!(window.PlayerFx && window.PlayerFx.pitchOn && window.PlayerFx.pitchOn(el));
+    // Once on, it stays on while you drag through 0 (at 1 it changes nothing): no switching back and forth.
+    const shift = !p.record && shifterOK() && (away(r) || on || !!p.force);
+    if (shift !== on && window.PlayerFx && window.PlayerFx.pitch) window.PlayerFx.pitch(el, shift ? r : null, { dip: !el.paused });
+    else if (shift) window.PlayerFx.pitch(el, r);
+    if (p.record || (away(r) && !shift)) { el.preservesPitch = false; el.playbackRate = r; return; }
+    el.preservesPitch = true;
+    el.playbackRate = p.tempo;
+  }
   function applySpeed() {
+    const p = ptFor(current);
+    if (p && !mix) { applyPt(audio, p); paintSpeed(); return; }
+    if (window.PlayerFx && window.PlayerFx.timeShape) window.PlayerFx.timeShape(audio, null);
+    if (window.PlayerFx && window.PlayerFx.slices) window.PlayerFx.slices(audio, null);
+    // In a DJ mix the mix sets the speeds (the song fading out follows Speed unless it's a key shift).
+    // During a mix, the new song follows (the old one stays where it was).
+    if (mix && mix.el === audio) { mix.toSpeed = speedRate(); setRate(audio, mix.toSpeed, mix.toStretch); } else setRate(audio, speedRate(), stretch);
+    paintSpeed();
+  }
+  function paintSpeed() {
     const on = $('lp-speed-on').checked;
     const pct = Number($('lp-speed').value);
-    audio.preservesPitch = false; // like changing the sample rate: faster is higher
-    audio.playbackRate = on ? Math.max(0.5, Math.min(4, 1 + pct / 100)) : 1;
-    const semis = on ? 12 * Math.log2(audio.playbackRate) : 0;
+    const semis = on ? 12 * Math.log2(speedRate()) : 0;
     const st = Math.abs(semis - Math.round(semis)) < 0.02 && Math.round(semis) ? ` · ${semis > 0 ? '+' : ''}${Math.round(semis)} st` : '';
     $('lp-speed-v').textContent = `${on ? Math.round((100 + pct) * 10) / 10 : 100}%${st}`;
     $('lp-speed').disabled = !on;
   }
-  $('lp-speed-on').addEventListener('change', applySpeed);
-  $('lp-speed').addEventListener('input', () => applySpeed());
-  $('lp-speed').addEventListener('dblclick', () => { $('lp-speed').value = '0'; applySpeed(); });
+  // Speed is kept between runs (on / off and the slider; a DJ key shift too, as it's on the slider).
+  const SPEED_KEY = 'nabbit.lpSpeed';
+  const saveSpeed = () => { try { localStorage.setItem(SPEED_KEY, JSON.stringify({ on: $('lp-speed-on').checked, v: Number($('lp-speed').value), dj: djSpeedOn })); } catch { /* none */ } };
+  try {
+    const sv = JSON.parse(localStorage.getItem(SPEED_KEY) || 'null');
+    if (sv) { $('lp-speed-on').checked = !!sv.on; $('lp-speed').value = String(Number(sv.v) || 0); djSpeedOn = !!sv.dj; }
+  } catch { /* defaults */ }
+  $('lp-speed-on').addEventListener('change', () => { djSpeedOn = false; cancelAnimationFrame(speedAnim); applySpeed(); });
+  for (const ev of ['change', 'input']) for (const id of ['lp-speed-on', 'lp-speed']) $(id).addEventListener(ev, () => djPaint());
+  $('lp-speed').addEventListener('input', () => { djSpeedOn = false; cancelAnimationFrame(speedAnim); applySpeed(); });
+  $('lp-speed').addEventListener('dblclick', () => { $('lp-speed').value = '0'; applySpeed(); saveSpeed(); });
+  // Saved after the handlers above (which settle whether DJ mode still owns the setting).
+  for (const ev of ['change', 'input']) for (const id of ['lp-speed-on', 'lp-speed']) $(id).addEventListener(ev, saveSpeed);
   // Scroll on the speed slider: one semitone (100 cents) up or down; switches speed on.
   const SEMI = 2 ** (1 / 12);
   function onSpeedWheel(e) {
     e.preventDefault();
-    const rate = 1 + Number($('lp-speed').value) / 100;
-    const semis = Math.round(12 * Math.log2(rate)) + (e.deltaY < 0 ? 1 : -1);
+    // From the speed you hear (100 % when Speed is off) to the next whole semitone up or down: from
+    // 110 % (+1.65) that's +2 up or +1 down; from a whole semitone, one more or one less.
+    const now = 12 * Math.log2(speedRate());
+    const semis = e.deltaY < 0 ? Math.floor(now + 0.03) + 1 : Math.ceil(now - 0.03) - 1;
     const next = Math.max(0.5, Math.min(4, SEMI ** semis));
     $('lp-speed').value = String(Math.round((next - 1) * 1000) / 10);
     $('lp-speed-on').checked = true;
+    djSpeedOn = false;
+    cancelAnimationFrame(speedAnim);
     applySpeed();
+    saveSpeed();
+    djPaint();
   }
   $('lp-speed').addEventListener('wheel', onSpeedWheel, { passive: false });
   document.querySelector('.lp-speed').addEventListener('wheel', (e) => { if (e.target !== $('lp-speed')) onSpeedWheel(e); }, { passive: false });
@@ -1275,12 +2103,18 @@
     if (current && current.path) { const r = list.querySelector(`.lp-tr[data-path="${CSS.escape(current.path)}"]`); if (r) r.classList.add('now'); }
   }
   function paintBar() {
-    $('lp-bar').classList.toggle('playing', !audio.paused);
+    mediaSync();
+    const on = guest ? guest.playing() : !audio.paused;
+    $('lp-bar').classList.toggle('playing', on);
+    $('lp-bar').classList.toggle('guest', !!guest);
     // Something's playing: the bars on the Player switch move.
-    document.body.classList.toggle('lp-playing', !audio.paused && !!current);
-    $('mode-eq').title = current && !audio.paused ? `Playing: ${current.title}` : '';
-    $('lp-play').setAttribute('aria-label', audio.paused ? 'Play' : 'Pause');
-    $('lp-play').title = audio.paused ? 'Play (Space)' : 'Pause (Space)';
+    document.body.classList.toggle('lp-playing', on && (!!current || !!guest));
+    $('mode-eq').title = on ? `Playing: ${guest ? guest.title : current ? current.title : ''}` : '';
+    $('lp-play').setAttribute('aria-label', on ? 'Pause' : 'Play');
+    $('lp-play').title = on ? 'Pause (Space)' : 'Play (Space)';
+    // Lists elsewhere mark the file that's playing (the Toolbox's ▶ buttons).
+    const key = `${current && !current.stream ? current.path : ''}|${on && !guest}`;
+    if (key !== paintBar.told) { paintBar.told = key; document.dispatchEvent(new CustomEvent('nabbit-now', { detail: { path: current && !current.stream ? current.path : null, playing: on && !guest } })); }
   }
   function heart(btn, t) {
     btn.classList.toggle('on', !!t.loved);
@@ -1325,7 +2159,40 @@
     setMode('toolbox');
     window.nabbitOpenArtist(String(name).trim());
   }
+  // ---------- A guest on the play bar (window.Player.attach) ----------
+  function attachGuest(g) {
+    if (guest && guest !== g) detachGuest(guest);
+    guest = g;
+    if (!audio.paused) audio.pause();
+    for (const r of document.querySelectorAll('#lp-bar .lp-np-rate')) r.classList.add('hidden');
+    $('lp-bar-title').textContent = g.title || 'Untitled';
+    $('lp-bar-title').title = g.reveal ? 'Show it' : '';
+    $('lp-bar-artist').textContent = g.sub || '';
+    $('lp-bar-state').classList.remove('hidden', 'err');
+    $('lp-bar-state').textContent = g.label || '';
+    $('lp-bar-art').style.backgroundImage = '';
+    $('lp-bar-art').classList.remove('pic');
+    guestVol();
+    showBar();
+    paintBar(); paintTime(); drawWave(true);
+    cancelAnimationFrame(guestRaf);
+    const loop = () => { if (guest !== g) return; if (g.playing()) { paintTime(); } guestRaf = requestAnimationFrame(loop); };
+    guestRaf = requestAnimationFrame(loop);
+  }
+  function detachGuest(g) {
+    if (!guest || (g && guest !== g)) return;
+    const was = guest;
+    guest = null;
+    cancelAnimationFrame(guestRaf);
+    if (was.onDetach) was.onDetach();
+    $('lp-bar').classList.remove('guest');
+    $('lp-bar-state').textContent = '';
+    paintNow();
+    showBar();
+    drawWave(true);
+  }
   function paintNow() {
+    if (guest) { paintBar(); return; } // the guest has the bar
     const t = current;
     markPlaying();
     paintBar();
@@ -1372,9 +2239,35 @@
     }
     paintUpNext();
     paintTime();
+    try { djPaint(); } catch { /* DJ mode isn't set up yet */ }
   }
+  // The album's name above the cover takes you to the album: yours in the library (scrolled to it,
+  // showing all music if the current view hides it), a streamed one in the Music Downloader.
+  function goToAlbum(t) {
+    if (!t || !t.album) return;
+    if (t.stream) {
+      if (!t.albumUrl || typeof musicOpen !== 'function') return;
+      setMode('toolbox');
+      goMusic();
+      musicOpen(t.albumUrl, { kind: 'Album', title: t.album, artist: t.artist, artistLinks: t.artistLinks, thumbnail: t.thumbnail });
+      return;
+    }
+    setMode('player');
+    if (!shown.includes(t)) { $('lib-q').value = ''; view = { kind: 'all', artist: null }; render(); }
+    const i = albums.findIndex((a) => a.tracks.includes(t));
+    const sec = i >= 0 ? $('lp-list').querySelectorAll('section.lp-album')[i] : null;
+    if (!sec) return;
+    sec.scrollIntoView({ block: 'start' });
+    sec.classList.remove('flash');
+    void sec.offsetWidth;
+    sec.classList.add('flash');
+  }
+  $('lp-next-name').setAttribute('role', 'link');
+  $('lp-next-name').addEventListener('click', () => { if ($('lp-next-name').classList.contains('go')) goToAlbum(current); });
+  $('lp-next-name').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && $('lp-next-name').classList.contains('go')) { e.preventDefault(); goToAlbum(current); } });
   // Clicking the play bar's song: a streamed one opens in the Music Downloader; yours, in the Player.
   $('lp-bar-title').addEventListener('click', () => {
+    if (guest) { if (guest.reveal) guest.reveal(); return; }
     const t = current;
     if (!t) return;
     if (!t.stream) { setMode('player'); return; }
@@ -1382,7 +2275,7 @@
     goMusic();
     if (typeof musicOpen === 'function') { try { muReturn = null; } catch { /* not there */ } musicOpen(t.url, t, false); }
   });
-  $('lp-bar-art').addEventListener('click', () => { if (current) setMode('player'); });
+  $('lp-bar-art').addEventListener('click', () => { if (guest) { if (guest.reveal) guest.reveal(); } else if (current) setMode('player'); });
   // Drag the playing song (its cover or title) out of the play bar: the file, into a folder or another app.
   for (const id of ['lp-bar-art', 'lp-bar-title']) {
     const d = $(id);
@@ -1397,20 +2290,24 @@
   }
   $('lp-bar-art').title = 'Show it in the Player (lyrics, up next)';
   // A song's picture: your file's cover, or the site's thumbnail.
-  const picOf = (t) => (t.stream ? Promise.resolve(t.thumbnail || null) : coverOf(t.path));
+  // A streamed song: its picture kept on this PC once it's whole (offline too), else the site's.
+  const picOf = (t) => (t.stream ? Promise.resolve(t.art || t.thumbnail || null) : coverOf(t.path));
   async function paintPic(box, t) {
     const url = await picOf(t);
     if (url) { box.style.backgroundImage = `url("${url}")`; box.classList.add('pic'); }
   }
   // Up next: the bar shows the next song and how many are left; the pop-up lists the queue from the
   // playing song on (built only while it's open; covers load as rows scroll into view).
-  const UN_MAX = 300;
+  const UN_MAX = 11; // the playing song and the next 10
   const unIO = new IntersectionObserver((entries) => {
     for (const en of entries) if (en.isIntersecting) { unIO.unobserve(en.target); const t = queue[Number(en.target.dataset.qi)]; if (t) paintPic(en.target, t); }
   }, { root: $('lp-upnext'), rootMargin: '200px' });
   function paintUpNext() {
     $('lp-next-name').textContent = current ? current.album || '' : '';
-    $('lp-next-name').title = current && current.album ? current.album : '';
+    const canGo = !!(current && current.album && (!current.stream || current.albumUrl));
+    $('lp-next-name').classList.toggle('go', canGo);
+    $('lp-next-name').tabIndex = canGo ? 0 : -1;
+    $('lp-next-name').title = canGo ? `Go to the album "${current.album}"` : current && current.album ? current.album : '';
     const nx = queue[qi + 1];
     const left = current ? Math.max(0, queue.length - qi - 1) : 0;
     $('lp-un-next').textContent = nx ? `${nx.title || 'Unknown title'}${nx.artist ? ` · ${nx.artist}` : ''}` : current ? (repeat === 'all' && queue.length ? 'Back to the start' : 'Nothing after this') : '—';
@@ -1433,7 +2330,8 @@
       const tx = el('span', 'lp-un-tx');
       tx.append(el('b', '', t.title || 'Unknown title'), el('small', '', t.artist || ''));
       li.append(el('span', 'lp-un-i', k === 0 ? '▶' : String(k)), art, tx, el('span', 'd', fmtTime(t.duration)));
-      li.title = 'Double-click to play';
+      li.title = t.unplayable ? `Couldn't play: ${t.unplayable}` : 'Double-click to play';
+      if (t.unplayable) li.classList.add('bad');
       li.addEventListener('dblclick', () => start(from + k));
       ol.append(li);
     });
@@ -1458,7 +2356,9 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('lp-un-pop').classList.contains('hidden')) toggleQueue(false); });
   // Lyrics: the file's tags, else a .lrc beside it, else LRCLIB (online); synced ones follow the song.
   const lyricsOnline = () => { try { return localStorage.getItem('nabbit.lpLrclib') !== '0'; } catch { return true; } };
+  let lyricsFor = null;
   async function loadLyrics(t) {
+    lyricsFor = t;
     const box = $('lp-lyrics');
     box.textContent = '';
     lrc = null;
@@ -1514,10 +2414,111 @@
       [queue, i] = order(base, Math.min(i, items.length - 1));
       start(i);
     },
+    /** To the Music Downloader (Toolbox), then fn (e.g. opening an artist's page there). */
+    toMusic(fn) { setMode('toolbox'); if (typeof goMusic === 'function') goMusic(); if (fn) fn(); },
     /** The streamed song playing (null for your own files). */
     get nowPlaying() { return current && current.stream ? current : null; },
     /** Pauses the music (another tool is about to play something). */
     pause() { if (!audio.paused) audio.pause(); },
+    /** Another tool playing through the play bar (Mastering): g = { title, sub, wave (PC.waveShape),
+     *  duration(), time(), playing(), toggle(), pause(), seek(sec), volume(gain), reveal() }. The music
+     *  pauses; the bar's play, position, volume and title then work the guest, until the player plays
+     *  a song again (or the bar's ✕). → update(), to call when the guest's state changes. */
+    attach(g) { attachGuest(g); return () => { if (guest === g) { paintBar(); paintTime(); } }; },
+    detach(g) { detachGuest(g); },
+    /** The bar's volume (0..1, squared like the player's). */
+    get volume() { const v = Number($('lp-vol').value) / 100; return audio.muted ? 0 : v * v; },
+    /** Audio Tools' pitch and tempo for one file (null: none): { path, semis, tempo, record }. Applies at once if it's playing. */
+    pitchTempo(p) {
+      // force: the shifter on even at the same pitch (formants moved, a chord, the robot).
+      // rt: the time shaper, live: { shape: { points, curves, cycle, steps }, bpm, offset }.
+      // sl: slice stretch / slice map, live: { key, pcm, cuts, mode } (PlayerFx.slices).
+      pt = p && p.path ? { path: p.path, semis: Number(p.semis) || 0, tempo: Math.max(0.25, Math.min(4, Number(p.tempo) || 1)), record: !!p.record, force: !!p.force, rt: p.rt || null, sl: p.sl && p.sl.pcm ? p.sl : null } : null;
+      if (current && !current.stream) applySpeed();
+    },
+    /** Play next (next) or add to the queue: files from anywhere. → false if none can play. */
+    async queueFiles(paths, next) {
+      let list = [];
+      try { list = (await window.api.playFilesInfo(paths)).filter((t) => t && t.playable); } catch { /* none */ }
+      if (!list.length) return false;
+      const lib = new Map(tracks.map((t) => [t.path, t]));
+      list = list.map((t) => lib.get(t.path) || t);
+      queueSongs(list, next);
+      return true;
+    },
+    /** Your playlists: [{ id, name }]. */
+    get playlistList() { return playlists.map((p) => ({ id: p.id, name: p.name })); },
+    /** Files from anywhere into a playlist (id), or a new one (no id). */
+    async addToPlaylist(id, paths) {
+      paths = (paths || []).filter((p) => typeof p === 'string' && p);
+      if (!paths.length) return;
+      try { for (const t of await window.api.playFilesInfo(paths)) if (t && !tracks.some((x) => x.path === t.path)) outside.set(t.path, t); } catch { /* read when shown */ }
+      if (id) addToPlaylist(id, paths);
+      else { const pl = newPlaylist(paths, false); toast(`Added ${paths.length === 1 ? '1 song' : `${paths.length} songs`} to ${pl.name}`); }
+    },
+    toast: (text) => toast(text),
+    /** Your library for Nabbit Home: { tracks, playlists } (loaded first if Player mode hasn't yet). */
+    async library() { if (!loaded) await load(); return { tracks, playlists }; },
+    /** Your plays: { key: { n, last, hits, item } } (see logPlay). */
+    get plays() { return plays; },
+    /** A file's cover (a data URL, or null). */
+    cover: (p) => coverOf(p),
+    /** Plays your own songs (library objects): list as the queue, from list[i]. */
+    playTracks(list, i = 0) {
+      list = (list || []).filter((t) => t && t.playable);
+      if (!list.length) return;
+      base = list.slice();
+      [queue, i] = order(base, Math.max(0, Math.min(i, list.length - 1)));
+      start(i);
+    },
+    /** Opens a view of the library (Local Files): { kind: 'all'|'recent'|'loved'|'rated'|'playlist', id?, artist? }. */
+    openView(v) { view = { kind: v.kind || 'all', id: v.id, artist: v.artist || null }; if (window.Sources) window.Sources.set('local'); render(); $('lp-list').scrollTop = 0; },
+    /** Plays files from anywhere (the Toolbox's lists): paths in order, from paths[i]. → false if none can play. */
+    async playFiles(paths, i = 0) {
+      const want = paths[i];
+      let list = [];
+      try { list = (await window.api.playFilesInfo(paths)).filter((t) => t && t.playable); } catch { /* none */ }
+      if (!list.length) return false;
+      base = list;
+      let k = Math.max(0, list.findIndex((t) => t.path.toLowerCase() === String(want).toLowerCase()));
+      [queue, k] = order(base, k);
+      start(k);
+      return true;
+    },
+    /** Where the player is: { path, time (s), rate } (for Audio Tools' time shaper's playhead). */
+    get position() { return current && !current.stream ? { path: current.path, time: audio.currentTime, rate: audio.playbackRate || 1, playing: !audio.paused } : null; },
+    /** A song's beat grid, set by hand ({ bpm, offset } in s, or null to go back to the analysis). Kept. */
+    setGrid(p, g) {
+      gridOf(p);
+      const k = String(p).toLowerCase();
+      if (g && g.bpm > 0) grids[k] = { bpm: g.bpm, offset: g.offset || 0 }; else delete grids[k];
+      try { localStorage.setItem('nabbit.grids', JSON.stringify(grids)); } catch { /* not kept */ }
+      drawWave(true);
+    },
+    getGrid: (p) => gridOf(p),
+    /** The beat of what's playing (Nabbit dances to it): your grid, else DJ mode's analysis, started
+     *  for the playing song if it hasn't been, DJ mode on or off (the tempo and first beat; the key
+     *  isn't shown unless DJ mode is on). { bpm, offset, time (s into the song, as heard), rate (the
+     *  playing speed: Speed, DJ stretches, pitch and tempo) }, or null until it's known. */
+    get beat() {
+      if (!current || audio.paused || guest) return null;
+      const own = !current.stream ? gridOf(current.path) : null;
+      const an = own ? null : djGet(current);
+      const g = own || (an && an.bpm > 0 ? an : null);
+      if (!g) return null;
+      const rate = audio.playbackRate || 1;
+      return { bpm: g.bpm, offset: g.offset || 0, time: audio.currentTime - pitchLag(audio) * rate, rate };
+    },
+    /** That file from time t: sought if it's the one playing, else played from there. */
+    async seekFile(p, t) {
+      if (current && !current.stream && current.path.toLowerCase() === String(p).toLowerCase()) { seekTo(t); if (audio.paused) audio.play().catch(() => {}); return; }
+      if (await this.playFiles([p], 0)) { const go = () => { audio.removeEventListener('loadedmetadata', go); seekTo(t); }; if (audio.readyState >= 1) go(); else audio.addEventListener('loadedmetadata', go); }
+    },
+    /** The file playing (or paused) in the player, if it's one of yours. */
+    get nowPath() { return current && !current.stream ? current.path : null; },
+    /** Which song is loaded (a file's path or a stream's address), '' for none: to tell when it changes. */
+    get songId() { return current ? String((current.stream ? current.url : current.path) || '') : ''; },
+    get isPlaying() { return !!current && !audio.paused; },
     /** Looks a song up ahead of time (hovering its ▶), so it starts quicker. */
     warm(url) { if (url) window.api.streamWarm(url, null).catch(() => {}); },
   };
@@ -1541,6 +2542,11 @@
   setInterval(() => { if (current && !audio.paused) saveSession(); }, 5000);
   onMedia('pause', saveSession);
   window.addEventListener('beforeunload', saveSession);
+  // Saved before playlists stopped naming their songs' album: a likes / playlist / mix "album" goes.
+  function notAlbum(t) {
+    if (t.album && (/\(Likes\)$/i.test(t.album) || /soundcloud\.com\/[^/]+\/(likes|reposts)\b|[?&]list=(PL|RD|LM|LL|WL)/i.test(t.albumUrl || ''))) { t.album = null; t.albumUrl = null; }
+    return t;
+  }
   async function restoreSession() {
     // After every script has run (the effects, player-fx.js, decide how your files are loaded).
     if (document.readyState === 'loading') await new Promise((r) => document.addEventListener('DOMContentLoaded', r, { once: true }));
@@ -1556,7 +2562,7 @@
     const items = [];
     let at = -1;
     s.q.forEach((x, k) => {
-      const t = x.s ? { ...x, stream: true, playable: true } : byPath.get(x.p);
+      const t = x.s ? notAlbum({ ...x, stream: true, playable: true }) : byPath.get(x.p);
       if (!t) return; // gone from the library
       if (k === s.qi) at = items.length;
       items.push(t);
@@ -1570,6 +2576,7 @@
     songStarted(t);
     if (t.stream) { paintVideo(); await openStream(t, seq, { at: pos, play: false }); return; }
     curSrc = sourceFor(t);
+    if (window.PlayerFx && window.PlayerFx.level) { window.PlayerFx.level(audio, 1); window.PlayerFx.pitch(audio, null); }
     if (!(await setLocalSrc(curSrc, seq))) return;
     applySpeed();
     const toPos = () => { try { audio.currentTime = Math.min(pos, (audio.duration || pos) - 0.5); } catch { /* not ready */ } paintTime(); };

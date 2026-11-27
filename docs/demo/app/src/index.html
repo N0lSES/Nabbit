@@ -306,7 +306,7 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
         <button type="button" class="tool" id="tm-out" title="End the selected segment here (O)"><kbd>O</kbd> End</button>
         <button type="button" class="tool" id="tm-split" title="Split the segment at the playhead (S)"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="4" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 10.5 12 2M10.5 10.5 4 2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>Split</button>
         <span class="tm-flex"></span>
-        <button type="button" class="tool" id="tm-snap" title="Save this frame as a PNG next to the file" aria-label="Snapshot"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2 5h3l1.5-2h3L11 5h3v8H2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="8" cy="9" r="2.3" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
+        <button type="button" class="tool" id="tm-snap" title="Save this frame as a PNG (Videos → Nabbit → Frames)" aria-label="Snapshot"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2 5h3l1.5-2h3L11 5h3v8H2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="8" cy="9" r="2.3" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
         <button type="button" class="tool" id="tm-zout" title="Zoom out" aria-label="Zoom out">−</button>
         <span class="tm-zoom" id="tm-zoom">1×</span>
         <button type="button" class="tool" id="tm-zin" title="Zoom in" aria-label="Zoom in">+</button>
@@ -326,9 +326,9 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
       <div class="tm-bar">
         <div class="tm-opt"><span class="tm-lab">Cut</span>
           <div class="tm-seg" role="radiogroup" aria-label="Cut mode">
-            <button type="button" class="chip active" data-cut="keyframe" title="Lossless and instant. Each segment starts on the keyframe at or before its start.">Keyframe</button>
+            <button type="button" class="chip" data-cut="keyframe" title="Lossless and instant. Each segment starts on the keyframe at or before its start.">Keyframe</button>
             <button type="button" class="chip" data-cut="smart" disabled title="Coming soon: lossless except a few frames at each cut">Smart</button>
-            <button type="button" class="chip" data-cut="exact" title="Re-encodes: starts and ends on the exact frame. Slower.">Exact</button>
+            <button type="button" class="chip active" data-cut="exact" title="Re-encodes: starts and ends on the exact frame. Slower.">Exact</button>
           </div></div>
         <div class="tm-opt"><span class="tm-lab">Segments</span>
           <div class="tm-seg" role="radiogroup" aria-label="Segments">
@@ -350,7 +350,7 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
     <section class="panel" id="compress">
       <div class="hud-tag" aria-hidden="true"><span>■ 05* ——— Compressor</span><span class="sys">SYS.READY <i class="dia">◆</i><i class="dia">◆</i><i class="dia">◆</i></span></div>
       <div class="hud-title"><h1>Compressor</h1><span class="caret" aria-hidden="true"></span><span class="ticks wipe" aria-hidden="true"></span></div>
-      <p class="hint">Video, audio, images, GIFs and PDFs. Drop a mix: each kind of file has its own settings, and the results are saved next to the originals.</p>
+      <p class="hint">Video, audio, images, GIFs and PDFs. Drop a mix: each kind of file has its own settings, and the results are saved in the Nabbit folders (Music, Videos or Documents → Nabbit → Compressed / Misc), or next to the originals: Settings → Where results go.</p>
       <div class="cp-main">
         <div class="cp-left">
           <button type="button" class="cp-drop" id="cp-drop"><img class="hud-ink" src="assets/hud/crosshair.svg" alt="" aria-hidden="true" /><span>Drop files or folders</span><span class="dim">· [+] Add…</span></button>
@@ -368,7 +368,7 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
       </div>
       <div class="cp-bar">
         <label class="check cp-keep"><input type="checkbox" id="cp-keep" checked /> Keep the original if the result isn't smaller</label>
-        <div class="cp-dest"><span class="tm-lab">Save to</span><span>Next to the original · <b>name_small.ext</b></span></div>
+        <div class="cp-dest"><span class="tm-lab">Save to</span><span>Nabbit's Compressed folders · <b>name_small.ext</b></span></div>
         <div class="cp-tot"><span class="tm-lab" id="cp-tot-label">0 files</span><span id="cp-tot">—</span></div>
         <button type="button" class="primary" id="cp-go" disabled>Compress</button>
       </div>
@@ -379,7 +379,7 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
     <section class="panel" id="editor">
       <div class="hud-tag" aria-hidden="true"><span>■ 06* ——— Audio tools</span><span class="sys">SYS.STANDBY <i class="dia">◆</i><i class="dia">◆</i><i class="dia">◆</i></span></div>
       <div class="hud-title"><h1>Audio Tools</h1><span class="caret" aria-hidden="true"></span><span class="ticks wipe" aria-hidden="true"></span></div>
-      <p class="hint">Find a song's key, tempo and tuning, see its scale on the piano, and write BPM and key into the file's tags.</p>
+      <p class="hint">Find a song's key, tempo and tuning, master it, split it into stems, and change its pitch and tempo.</p>
 
       <!-- Key & BPM finder (laid out like Antares Auto-Key: source · result · scale · piano) -->
       <div class="ed-tools-bar"><span>■ Tools <b id="ed-tools-n"></b></span><button type="button" class="ghost" id="ed-tools-all">Collapse all</button></div>
@@ -436,13 +436,7 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
             <span class="ms-src-name" id="ms-name">Drop a song here, or click</span>
           </button>
           <div class="ms-transport">
-            <div class="ms-row">
-              <button type="button" class="ms-play" id="ms-play" disabled aria-label="Play">▶</button>
-              <span class="ms-time" id="ms-time">0:00</span>
-              <input type="range" class="cp-range ms-seek" id="ms-seek" min="0" max="1000" value="0" disabled aria-label="Position" />
-              <span class="ms-time" id="ms-dur">0:00</span>
-              <span class="ms-vol" title="Listening volume (doesn't change the export or the meters)"><span aria-hidden="true">Vol</span><input type="range" class="cp-range" id="ms-vol" min="0" max="100" value="80" aria-label="Listening volume" /></span>
-            </div>
+            <p class="ms-barnote dim">Play, pause and seek on the play bar below (its volume is the listening volume). <button type="button" class="ghost hidden" id="ms-onbar" title="The player has the play bar: put this song back on it">▶ Play on the bar</button></p>
             <div class="ms-row ms-meters">
               <button type="button" class="ghost ms-ab" id="ms-ab" title="Hear the song without the chain (B), or with it (A)" aria-pressed="false">A/B · Chain</button>
               <div class="ms-mgrp" title="Output peak, left and right">
@@ -514,25 +508,99 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
           <button type="button" class="primary" id="ms-export" disabled>Export master</button>
         </div>
       </details>
-      <details class="ed-tool soon" id="tool-trim">
-        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Trim, fade in / out</span><span class="soon-tag">Soon</span></summary>
-        <p class="hint small ed-tool-body">Cut the start and end of a song and fade it in or out, without re-encoding where the format allows.</p>
+      <!-- Stem splitter: songs into vocals, drums, bass, ... with a model run on this PC (stems-ui.js) -->
+      <details class="ed-tool sp" id="tool-stems">
+        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Split vocals and instruments</span><span class="ak-sub">Stems · Demucs · UVR models</span></summary>
+        <div class="sp-body">
+        <p class="hint small">Split songs into vocals, drums, bass and the rest, on this PC. Models are downloaded only when you ask (or use your own).</p>
+        <p class="sp-warn hidden" id="sp-ort">ONNX Runtime isn't installed yet: run <b>npm install</b> in Nabbit's folder, then restart Nabbit.</p>
+        <div class="cp-main">
+          <div class="cp-left">
+            <button type="button" class="cp-drop" id="sp-drop"><img class="hud-ink" src="assets/hud/crosshair.svg" alt="" aria-hidden="true" /><span>Drop songs or videos</span><span class="dim">· [+] Add…</span></button>
+            <div class="cp-queue">
+              <div class="cp-qhead"><span class="t">#</span><span class="f">File</span><span class="v">Status</span><button type="button" class="cp-clear" id="sp-clear" aria-label="Remove every file from the list" title="Clear the list">✕</button></div>
+              <ol class="cp-list" id="sp-list"></ol>
+              <p class="cp-empty" id="sp-empty">No files yet. Drop some here, or use Add.</p>
+            </div>
+          </div>
+          <div class="cp-set">
+            <div class="cp-set-head"><span>■ Settings</span><span id="sp-dev-tag"></span></div>
+            <div class="cp-set-body" id="sp-set"></div>
+          </div>
+        </div>
+        <div class="cp-bar">
+          <label class="check cp-keep"><input type="checkbox" id="sp-sample" /> Try 30 seconds first</label>
+          <div class="cp-dest sp-dest"><span class="tm-lab">Save to</span><span><button type="button" class="sp-link" id="sp-out" title="Choose a folder for the stems (each song gets its own folder in it)"></button> <button type="button" class="sp-link hidden" id="sp-out-reset" title="Back to where results go (Settings)">· the usual place</button></span><span class="dim" id="sp-out-eg"></span></div>
+          <button type="button" class="primary" id="sp-go" disabled>Split</button>
+        </div>
+        <div class="sp-models">
+          <div class="cp-set-head"><span>■ Models</span><span class="sp-dir"><span id="sp-dir" class="dim"></span> <button type="button" class="sp-link" id="sp-dir-btn">Change folder…</button></span></div>
+          <ol class="sp-mlist" id="sp-mlist"></ol>
+          <div class="sp-mfoot"><button type="button" id="sp-add-own">+ Add your own model (.onnx)…</button><span class="dim">UVR's MDX-Net models and Demucs ONNX exports work. Your own models stay where they are.</span></div>
+        </div>
+        </div>
       </details>
-      <details class="ed-tool soon" id="tool-pitch">
-        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Change pitch and tempo</span><span class="soon-tag">Soon</span></summary>
-        <p class="hint small ed-tool-body">Shift a song to another key or speed it up and slow it down, each one on its own.</p>
-      </details>
-      <details class="ed-tool soon" id="tool-loud">
-        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Normalize loudness</span><span class="soon-tag">Soon</span></summary>
-        <p class="hint small ed-tool-body">Even out the volume of a song or a whole folder to a set loudness (LUFS).</p>
-      </details>
-      <details class="ed-tool soon" id="tool-stems">
-        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Split vocals and instruments</span><span class="soon-tag">Soon</span></summary>
-        <p class="hint small ed-tool-body">Separate a song into vocals and backing tracks.</p>
-      </details>
-      <details class="ed-tool soon" id="tool-tags">
-        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Edit tags and cover art</span><span class="soon-tag">Soon</span></summary>
-        <p class="hint small ed-tool-body">Change titles, artists, albums and cover art for one file or many.</p>
+      <!-- Change pitch and tempo: plays through the player (pitchtempo-ui.js); export with ffmpeg -->
+      <details class="ed-tool pt" id="tool-pitch">
+        <summary class="ak-head"><span class="ed-tool-name"><i class="ed-chev" aria-hidden="true"></i>Change pitch and tempo</span><span class="ak-sub">Pitch · tempo · key · BPM</span></summary>
+        <div class="pt-body">
+          <div class="pt-top">
+            <button type="button" class="ms-src" id="pt-src" title="Choose a song (or drop one here)">
+              <svg viewBox="0 0 48 56" aria-hidden="true"><path d="M6 2h24l12 12v40H6z" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M30 2v12h12" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M13 36v-6M18 40v-14M23 42v-18M28 38v-10M33 35v-4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+              <span class="ms-src-name" id="pt-name">Drop a song here, or click</span>
+            </button>
+            <div class="pt-read">
+              <div class="pt-stat"><span class="tm-lab">Key</span><b id="pt-key">—</b><small id="pt-key0"></small></div>
+              <div class="pt-stat"><span class="tm-lab">Tempo</span><b id="pt-bpm">—</b><small id="pt-bpm0"></small></div>
+              <div class="pt-stat"><span class="tm-lab">Length</span><b id="pt-len">—</b><small id="pt-len0"></small></div>
+              <span id="pt-play-slot"></span>
+            </div>
+          </div>
+          <section class="pt-sec">
+            <div class="pt-sec-head"><span>■ Pitch &amp; tempo</span><label class="check pt-rec" title="Pitch and tempo together, from the pitch (like changing a record's speed or the sample rate): the cleanest sound"><input type="checkbox" id="pt-record" /> Like a record</label></div>
+            <div class="pt-ctls">
+              <label class="pt-ctl"><span class="tm-lab">Pitch <em id="pt-semis-v">0 st</em></span><input type="range" class="cp-range" id="pt-semis" min="-12" max="12" step="1" value="0" aria-label="Pitch in semitones" title="Semitones. Double-click: 0" /></label>
+              <label class="pt-ctl"><span class="tm-lab">Fine <em id="pt-cents-v">0 ¢</em></span><input type="range" class="cp-range" id="pt-cents" min="-100" max="100" step="1" value="0" aria-label="Fine pitch in cents" title="Cents (hundredths of a semitone). Double-click: 0" /></label>
+              <label class="pt-ctl"><span class="tm-lab">Tempo <em id="pt-tempo-v">100 %</em></span><input type="range" class="cp-range" id="pt-tempo" min="50" max="200" step="0.5" value="100" aria-label="Tempo in percent" title="Double-click: 100 %" /></label>
+              <label class="pt-ctl pt-bpmin"><span class="tm-lab">To BPM</span><input type="number" id="pt-bpm-in" min="20" max="400" step="0.1" placeholder="—" aria-label="Target tempo in BPM" /></label>
+            </div>
+          </section>
+          <section class="pt-sec">
+            <div class="pt-sec-head"><span>■ Engine</span></div>
+            <div class="tm-seg cp-seg" id="pt-algo" role="radiogroup" aria-label="Pitch engine"></div>
+            <p class="dim small pt-algo-note" id="pt-algo-note"></p>
+            <div class="pt-more">
+              <label class="pt-ctl pt-formant hidden" id="pt-formant-box"><span class="tm-lab">Formant <em id="pt-formant-v">0 st</em></span><input type="range" class="cp-range" id="pt-formant" min="-12" max="12" step="0.5" value="0" aria-label="Formant shift in semitones" title="Moves the voice's resonances on their own (deeper / chipmunk) without changing the notes. Double-click: 0" /></label>
+              <div class="pt-chord hidden" id="pt-chord">
+                <div class="pt-chord-top"><span class="tm-lab">Chord</span><div class="tm-seg cp-seg" id="pt-chord-presets"></div><label class="check"><input type="checkbox" id="pt-latch" checked /> Latch</label><span class="dim small" id="pt-midi"></span></div>
+                <div class="pt-keys" id="pt-keys" aria-label="Notes of the chord"></div>
+                <p class="dim small" id="pt-chord-note"></p>
+              </div>
+            </div>
+          </section>
+          <section class="pt-sec pt-grid" id="pt-grid">
+            <div class="pt-sec-head"><span>■ Beat grid</span><button type="button" class="ghost sh-btn pt-metro" id="pt-metro" aria-pressed="false" title="Metronome: a click on every beat of the grid while the song plays (higher on the first beat of each bar)">♩ Metronome</button></div>
+            <div class="pt-grid-top">
+              <div class="pt-gbpm"><span class="tm-lab">BPM</span><div class="pt-row"><input type="number" id="pt-gbpm" min="40" max="300" step="1" aria-label="Tempo (whole BPM)" /><button type="button" class="ghost sh-btn" id="pt-ghalf" title="Half the tempo">÷2</button><button type="button" class="ghost sh-btn" id="pt-gdbl" title="Double the tempo">×2</button></div></div>
+              <div class="pt-goff"><span class="tm-lab">Offset <em id="pt-goff-v">0 ms</em></span><div class="pt-row"><button type="button" class="ghost sh-btn" id="pt-gl" title="Grid 5 ms earlier (Shift: 1 ms)">−</button><input type="range" class="cp-range" id="pt-goff" min="0" max="2000" step="1" value="0" aria-label="Where the first bar starts (ms)" title="Moves the grid: where the bars start. Double-click: back to the analysis" /><button type="button" class="ghost sh-btn" id="pt-gr" title="Grid 5 ms later (Shift: 1 ms)">+</button></div></div>
+              <div class="pt-gview"><span class="tm-lab">View</span><div class="pt-row"><div class="tm-seg cp-seg" id="pt-gzoom" aria-label="Zoom"></div><button type="button" class="ghost sh-btn" id="pt-greset" title="Back to what the analysis found (whole BPM)">Reset</button></div></div>
+            </div>
+            <canvas class="pt-gcv" id="pt-gcv" aria-label="The song's waveform with the beat grid"></canvas>
+            <p class="dim small pt-ghint">Drag the grid so the numbered bar lines sit on the downbeats · scroll to move · click to play from there</p>
+          </section>
+          <section class="pt-sec">
+            <div class="pt-sec-head"><span>■ Rhythm</span></div>
+            <div class="pt-rhythm"><div class="tm-seg cp-seg" id="pt-rhythm" role="radiogroup" aria-label="Rhythm"></div><span class="pt-rhy-opts" id="pt-rhy-opts"></span><button type="button" class="ghost sh-btn" id="pt-rhy-go">Render preview</button></div>
+            <p class="dim small pt-rhy-note" id="pt-rhy-note"></p>
+            <div class="pt-shaper hidden" id="pt-shaper"></div>
+          </section>
+          <div class="pt-save">
+            <div class="tm-seg cp-seg" id="pt-fmt" role="radiogroup" aria-label="Save as"></div>
+            <button type="button" class="ghost" id="pt-reset" title="Everything back to the song as recorded">Reset all</button>
+            <button type="button" class="primary" id="pt-go" disabled>Export</button>
+          </div>
+          <p class="hint small pt-note" id="pt-note">It plays on the play bar below, through the player (its tempo with the pitch kept, and DJ mode's pitch shifter). The export is saved in Music → Nabbit → Pitch and Tempo (or next to the song: Settings → Where results go) as "name (+2 st, 110 %)".</p>
+        </div>
       </details>
       </div>
     </section>
@@ -553,6 +621,8 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
         <h2>Window</h2>
         <label class="check"><input id="st-tray" type="checkbox" /> Keep running in the system tray when the window is closed</label>
         <p class="hint small">Downloads, conversions and the browser extension keep working while Nabbit is in the tray.</p>
+        <label class="check"><input id="st-mediakeys" type="checkbox" /> Media keys always control Nabbit while a song is loaded</label>
+        <p class="hint small">So a browser tab or another app can't take over play / pause, next and previous. With the player closed they go back to other apps.</p>
       </div>
 
       <div class="set-group">
@@ -570,6 +640,35 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
         </div>
         <label class="check"><input id="st-fx" type="checkbox" /> Cursor effects (tether lines)</label>
         <label class="check win-only" id="st-blur-row"><input id="st-blur" type="checkbox" /> Window blur (see-through background, Windows 11)</label>
+      </div>
+
+      <div class="set-group" id="st-nabbit">
+        <h2>Nabbit</h2>
+        <div class="nb-wrap">
+          <div class="nb-stage"><canvas id="nb-preview" width="120" height="120" aria-label="Nabbit, as he'll look"></canvas></div>
+          <div class="nb-opts">
+            <div class="st-accent">
+              <span class="st-accent-l">Colour</span>
+              <span class="st-swatches" id="nb-colours" role="radiogroup" aria-label="Nabbit's colour"></span>
+              <label class="st-pick" title="Any colour"><input type="color" id="nb-colour" aria-label="Pick any colour for Nabbit" /></label>
+            </div>
+            <div class="st-accent">
+              <span class="st-accent-l">Clothes colour</span>
+              <span class="st-swatches" id="nb-cloth-colours" role="radiogroup" aria-label="Clothes colour"></span>
+              <label class="st-pick" title="Any colour"><input type="color" id="nb-cloth" aria-label="Pick any colour for his clothes" /></label>
+            </div>
+            <div class="nb-items">
+              <label>Hat <select id="nb-hat"></select></label>
+              <label>Glasses <select id="nb-eyes"></select></label>
+              <label>Neck <select id="nb-neck"></select></label>
+              <label>Outfit <select id="nb-body"></select></label>
+            </div>
+            <div class="nb-btns">
+              <button type="button" class="ghost small" id="nb-random">Surprise me</button>
+              <button type="button" class="ghost small" id="nb-reset">Reset</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="set-group win-only">
@@ -618,13 +717,82 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
         <label class="check"><input id="lf-love" type="checkbox" /> Send ♥ as Last.fm loves</label>
       </div>
 
+      <div class="set-group" id="sh-group">
+        <h2>Share links</h2>
+        <p class="hint small">Share a video on your PC as a link that plays right in Discord, while Nabbit is open. It goes through Tailscale Funnel (free), so your IP address stays hidden. <button type="button" class="linkish" id="sh-get">Get Tailscale</button> (downloads the installer), sign in, then turn this on. Videos that wouldn't play in Discord get an MP4 copy automatically.</p>
+        <p class="lf-status" id="sh-status">Off</p>
+        <div class="row lf-acts">
+          <button type="button" class="ghost hidden" id="sh-enable">Turn on Funnel for your tailnet</button>
+          <button type="button" class="ghost hidden" id="sh-retry">Try again</button>
+        </div>
+        <label class="check"><input id="sh-on" type="checkbox" /> Share links while Nabbit is open</label>
+        <label class="check"><input id="sh-embed" type="checkbox" /> Lighter copy for Discord's player when a video is too big</label>
+        <p class="hint small" id="sh-embed-info">Discord downloads the whole video within about 10 seconds, so big ones get a smaller copy (for Discord only; the link's page keeps the original).</p>
+        <label>Copy links as
+          <select id="sh-style">
+            <option value="clean">Just the video (clean: no title or link text in Discord)</option>
+            <option value="page">With title and picture (a page; opens the original in a browser)</option>
+          </select>
+        </label>
+        <label>New links last
+          <select id="sh-hours">
+            <option value="1">1 hour</option>
+            <option value="24">1 day</option>
+            <option value="168">1 week</option>
+            <option value="720">30 days</option>
+            <option value="0">Until I take them back</option>
+          </select>
+        </label>
+        <div class="row"><button type="button" class="ghost" id="sh-pick">Share a video…</button><p class="hint small">or drop one here, or right-click a video in Recent or in Explorer (Nabbit ▸ Share link).</p></div>
+        <ul class="sh-list" id="sh-list"></ul>
+        <p class="hint small">Embed not showing in Discord? <button type="button" class="linkish" id="sh-log">See what was asked for</button> (the request log).</p>
+      </div>
+
+      <div class="set-group" id="dc-group">
+        <h2>Discord</h2>
+        <p class="hint small">Shows what you play in Player mode on your Discord profile ("Listening to Nabbit"), with your Nabbit as the picture. Through the Discord app on this PC: no sign-in, nothing else is sent.</p>
+        <div class="dc-row">
+          <div class="dc-opts">
+            <div class="mu-provider st-layout" id="dc-mode" role="radiogroup" aria-label="Show on Discord">
+              <button type="button" class="seg" data-v="off" role="radio">Off</button>
+              <button type="button" class="seg" data-v="songs" role="radio">Songs</button>
+              <button type="button" class="seg" data-v="tools" role="radio">Songs + tools</button>
+            </div>
+            <p class="lf-status" id="dc-status">Off</p>
+            <div class="mu-provider st-layout" id="dc-pic" role="radiogroup" aria-label="Picture">
+              <button type="button" class="seg" data-v="mine" role="radio">My Nabbit</button>
+              <button type="button" class="seg" data-v="preset" role="radio">Ready-made</button>
+            </div>
+            <p class="hint small" id="dc-pic-hint"></p>
+            <label class="check"><input id="dc-album" type="checkbox" /> Album name (on hover)</label>
+            <label class="check"><input id="dc-time" type="checkbox" /> Time and progress bar</label>
+            <label class="check"><input id="dc-play" type="checkbox" /> "Play on YouTube Music / SoundCloud" button (streamed songs)</label>
+            <p class="hint small">Streamed songs show their own cover with your Nabbit on it; your own files show your Nabbit (their covers stay on this PC). The Toolbox shows only what's happening ("Converting 3 files"), never file names. Paused for 5 minutes: it goes.</p>
+            <label class="dc-app" id="dc-app-row">Discord application ID
+              <input type="text" id="dc-app" placeholder="e.g. 1234567890123456789" spellcheck="false" autocomplete="off" inputmode="numeric" />
+            </label>
+          </div>
+          <div class="dc-prev"><span class="dc-prev-l">What Discord gets</span><canvas id="dc-preview" width="128" height="128" aria-label="Your Nabbit, as Discord shows him"></canvas></div>
+        </div>
+      </div>
+
+      <div class="set-group" id="st-where">
+        <h2>Where results go</h2>
+        <div class="mu-provider st-layout" id="st-layout" role="radiogroup" aria-label="Where results go">
+          <button type="button" class="seg" data-layout="nabbit" role="radio">Nabbit folders</button>
+          <button type="button" class="seg" data-layout="beside" role="radio">Next to the original</button>
+        </div>
+        <p class="hint small" id="st-layout-hint"></p>
+        <div class="st-folders" id="st-folders"></div>
+      </div>
+
       <div class="set-group">
         <h2>Downloads</h2>
         <label>Save downloads to</label>
         <div class="folder-pick">
           <input id="st-dir" type="text" readonly />
           <button type="button" class="ghost" id="st-dir-pick">Browse</button>
-          <button type="button" class="ghost" id="st-dir-reset" title="Use the Downloads folder">Reset</button>
+          <button type="button" class="ghost" id="st-dir-reset" title="Back to Nabbit's folders: Videos\Nabbit\Videos and Music\Nabbit\Music">Reset</button>
         </div>
         <label class="check"><input id="st-ytm" type="checkbox" /> Check YouTube Music for a higher-quality copy of SoundCloud songs and albums</label>
         <p class="hint small">When you open a SoundCloud song or album, Nabbit looks for the same release on YouTube Music and tells you if its audio is better.</p>
@@ -698,16 +866,21 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
       <div class="lp-row">
         <div class="lp-main">
           <div class="lp-head">
-            <span class="lp-title" id="lp-title">All music</span>
+            <span class="lp-title" id="lp-title">Local Files</span>
+            <span class="lp-title lp-ptitle" id="lp-ptitle"></span>
             <span class="lp-stats" id="lp-stats"></span>
+            <span class="lp-stats lp-pstats" id="lp-pstats"></span>
             <span class="lp-sp"></span>
             <span class="lp-scan hidden" id="lp-scan"></span>
-            <button type="button" class="lp-txt" id="lp-playall">Play all</button>
-            <button type="button" class="lp-txt dim" id="lp-shuffleall">Shuffle</button>
-            <button type="button" class="lp-txt dim" id="lp-sort" title="Group by album, or follow your folders">Sort: Album</button>
+            <button type="button" class="lp-hbtn" id="lp-playall" aria-label="Play all" title="Play all"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="fill" d="M7 4.5v15l12-7.5z"/></svg></button>
+            <button type="button" class="lp-hbtn" id="lp-shuffleall" aria-label="Shuffle all" title="Shuffle all"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3c5 0 5 10 10 10h3M17 14l3 3-3 3M4 17h3c1.5 0 2.5-.9 3.3-2M13.7 9c.8-1.1 1.8-2 3.3-2h3M17 4l3 3-3 3"/></svg></button>
+            <button type="button" class="lp-hbtn" id="lp-sort" aria-label="Sort: Album" title="Sorted by album: click to follow your folders"></button>
+            <span class="tm-seg lp-prov" id="lp-prov" role="tablist" aria-label="Music from"></span>
           </div>
           <div class="lp-cols" aria-hidden="true"><span>Artwork</span><span>Album</span><span>#</span><span>Title</span><span>Artist</span><span>Rating</span><span>Time</span></div>
           <div class="lp-list" id="lp-list" tabindex="-1"></div>
+          <!-- Nabbit Home (nabbit-home.js), YouTube Music / SoundCloud homes and Discovery (home-ui.js) -->
+          <div class="lp-home" id="lp-home" tabindex="-1"></div>
         </div>
         <aside class="lp-now" id="lp-now" aria-label="Now playing">
           <!-- The loop: behind the top of the panel, down to the bottom of the cover's spot -->
@@ -732,6 +905,7 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
             </div></div>
             <div class="lp-np-rate"><button type="button" class="lp-heart" id="lp-np-heart" aria-label="Love this song" aria-pressed="false">♥</button><span class="lp-stars" id="lp-np-stars"></span></div>
             <div class="lp-np-fmt" id="lp-np-fmt"></div>
+            <div class="lp-np-dj hidden" id="lp-np-dj"></div>
             <div class="lp-lyr-head"><span>Lyrics</span><span id="lp-lyr-src"></span></div>
             <div class="lp-lyrics" id="lp-lyrics"></div>
           </div>
@@ -791,6 +965,7 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
       <div class="lp-time"><span id="lp-t0">0:00</span><span class="lp-wave"><canvas id="lp-wave" aria-hidden="true"></canvas><input type="range" id="lp-seek" min="0" max="1000" value="0" aria-label="Position" /></span><span id="lp-t1">0:00</span></div>
     </div>
     <div class="lp-bar-right">
+      <button type="button" class="lp-ico lp-dj" id="lp-dj" aria-label="DJ mode" aria-pressed="false" aria-expanded="false" title="DJ mode (D): long crossfades in time and in key"><span aria-hidden="true">DJ</span></button>
       <button type="button" class="lp-ico" id="lp-fx" aria-label="Effects" title="Effects" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M12 4v16M19 4v16"/><path d="M3 15h4M10 8h4M17 12h4"/></svg></button>
       <button type="button" class="lp-ico" id="lp-mute" aria-label="Mute" title="Mute"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path class="i-wave" d="M16 9a4 4 0 0 1 0 6"/><path class="i-x" d="M16 10l4 4M20 10l-4 4"/></svg></button>
       <span class="lp-volwrap" title="Volume · the bars show the output level, left and right (red: clipping)"><canvas id="lp-vmeter" aria-hidden="true"></canvas><input type="range" id="lp-vol" min="0" max="100" value="80" aria-label="Volume" /></span>
@@ -834,9 +1009,19 @@ slsk://user/path/folder/   ·   a .csv or .txt list (drop it here)
   <script src="batch.js"></script>
   <script src="../library.js"></script>
   <script src="player-mode.js"></script>
+  <script src="discovery-ui.js"></script>
+  <script src="nabbit-home.js"></script>
+  <script src="home-ui.js"></script>
+  <script src="nabbit-pet.js"></script>
   <script src="player-fx.js"></script>
   <script src="lastfm-ui.js"></script>
+  <script src="share-ui.js"></script>
   <script src="compress.js"></script>
+  <script src="stems-ui.js"></script>
+  <script src="file-actions.js"></script>
+  <script src="../pitch.js"></script>
+  <script src="shaper-ui.js"></script>
+  <script src="pitchtempo-ui.js"></script>
   <script src="selects.js"></script>
 </body>
 </html>

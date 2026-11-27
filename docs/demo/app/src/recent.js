@@ -67,8 +67,16 @@
       li.draggable = !!r.exists;
       li.tabIndex = 0;
       li.title = r.exists ? `${r.path}\nDrag it out of the window to copy it somewhere.` : `${r.path}\n(moved or deleted)`;
-      const grip = Object.assign(document.createElement('span'), { className: 'rc-grip', textContent: '⋮⋮' });
-      grip.setAttribute('aria-hidden', 'true');
+      // Songs and videos: ▶ in the grip's place (shown on hover), playing in the player, then the rest of the list.
+      let grip;
+      if (r.exists && typeof filePlayButton === 'function' && canPlayFile(r.path)) {
+        grip = filePlayButton(() => shown.filter((x) => x.exists).map((x) => x.path), r.path, { num: '⋮⋮' });
+        grip.classList.add('rc-grip');
+        grip.draggable = false;
+      } else {
+        grip = Object.assign(document.createElement('span'), { className: 'rc-grip', textContent: '⋮⋮' });
+        grip.setAttribute('aria-hidden', 'true');
+      }
       const th = document.createElement('span');
       th.className = `rc-thumb ${kindOf(r.name)}`;
       th.setAttribute('aria-hidden', 'true');
@@ -123,8 +131,24 @@
       b.addEventListener('click', async () => { closeMenu(); try { await fn(); } catch (e) { alert(String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); } });
       menu.append(b);
     };
-    add('Open', () => window.api.recentOpen(r.path), { disabled: !r.exists });
+    const sep = () => { const d = document.createElement('div'); d.className = 'rc-sep'; d.setAttribute('role', 'separator'); menu.append(d); };
+    const FA = window.FileActions, k = FA ? FA.kindOf(r.path) : kindOf(r.name), av = k === 'video' || k === 'audio', gone = { disabled: !r.exists };
+    add('Open', () => window.api.recentOpen(r.path), gone);
+    // Songs and videos: into the player (src/file-actions.js).
+    if (FA && av) {
+      sep();
+      add('Play', () => FA.play([r.path], 'now'), gone);
+      add('Play next', () => FA.play([r.path], 'next'), gone);
+      add('Add to queue', () => FA.play([r.path], 'queue'), gone);
+      add('Add to playlist…', () => FA.playlistMenu([r.path], parseFloat(menu.style.left), parseFloat(menu.style.top)), gone);
+      sep();
+      add('Separate stems', () => FA.stems([r.path]), gone);
+    }
+    if (FA && (av || k === 'image')) add('Compress', () => FA.compress([r.path]), gone);
+    if (FA && av) add('Search on Soulseek', () => FA.soulseek(r.path), gone);
+    sep();
     add('Show in folder', () => window.api.showItem(r.path), { disabled: !r.exists });
+    if (window.nabbitShare && ['video', 'audio'].includes(kindOf(r.name))) add('Share link (copy)', () => window.nabbitShare(r.path), { disabled: !r.exists });
     add('Download again', () => {
       document.querySelector('.tab[data-mode="video"]').click();
       const u = $('dl-url');

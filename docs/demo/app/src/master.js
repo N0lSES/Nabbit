@@ -1,6 +1,6 @@
 // Audio Tools · Mastering. A song plays through the chain (mastering.js) live, so every slider and
 // on / off switch is heard as it changes. Export renders the same chain over the whole file in Nabbit's
-// main process (ffmpeg in, chain, ffmpeg out) and saves "<name> (master).<ext>" next to the song.
+// main process (ffmpeg in, chain, ffmpeg out) and saves "<name> (master).<ext>" in Music\Nabbit\Masters (or next to the song).
 (() => {
   const $ = (id) => document.getElementById(id);
   const M = window.Mastering;
@@ -60,45 +60,60 @@
     };
   }
 
-  // Volume slider: 0–100 on a squared curve (finer control at the quiet end), remembered.
-  const volEl = $('ms-vol');
-  try { const v = localStorage.getItem('nabbit.masterVol'); if (v !== null) volEl.value = v; } catch { /* default */ }
-  function volGain() { const v = Number(volEl.value) / 100; return v * v; }
-  volEl.addEventListener('input', () => {
-    if (volume) volume.gain.setTargetAtTime(volGain(), ctx.currentTime, 0.015);
-    try { localStorage.setItem('nabbit.masterVol', volEl.value); } catch { /* none */ }
-  });
-  const fmtTime = (s) => { s = Math.max(0, Math.floor(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  // Playing, the position and the listening volume are the play bar's (player-mode.js: the song loaded
+  // here is its guest), so Mastering works like the Player. The volume comes after the chain and the
+  // meters, so it changes neither the export nor the readings.
+  function volGain() { return window.Player && window.Player.attach ? window.Player.volume : 0.64; }
+  let barUpdate = null, barPlaying = null;
   function renderTransport() {
-    const dur = buffer ? buffer.duration : 0;
-    $('ms-play').textContent = playing ? '❚❚' : '▶';
-    $('ms-play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
-    $('ms-play').disabled = !buffer;
-    $('ms-seek').disabled = !buffer;
     $('ms-export').disabled = !file;
-    $('ms-dur').textContent = fmtTime(dur);
-    $('ms-time').textContent = fmtTime(buffer ? pos / buffer.sampleRate : 0);
-    if (buffer && !seeking) $('ms-seek').value = String(Math.round((pos / buffer.length) * 1000));
+    if (barUpdate && barPlaying !== playing) { barPlaying = playing; barUpdate(); }
   }
-  let seeking = false;
-  $('ms-seek').addEventListener('input', () => {
-    if (!buffer) return;
-    seeking = true;
-    pos = Math.floor((Number($('ms-seek').value) / 1000) * buffer.length);
-    if (chain) chain.reset();
-    $('ms-time').textContent = fmtTime(pos / buffer.sampleRate);
-  });
-  $('ms-seek').addEventListener('change', () => { seeking = false; });
-  $('ms-play').addEventListener('click', async () => {
+  async function togglePlay() {
     if (!buffer) return;
     ensureAudio();
     if (ctx.state === 'suspended') await ctx.resume();
     if (!playing && pos === 0) chain.reset();
     playing = !playing;
-    // Only one thing plays at a time: pause the music player.
-    if (playing && window.Player && window.Player.pause) window.Player.pause();
     renderTransport();
-  });
+  }
+  function seek(sec) {
+    if (!buffer) return;
+    pos = Math.max(0, Math.min(buffer.length - 1, Math.floor(sec * buffer.sampleRate)));
+    if (chain) chain.reset();
+  }
+  // The song's shape for the bar's position: the loudest sample in each of 1200 slices.
+  function wavePeaks() {
+    const n = 1200, a = buffer.getChannelData(0), b = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : a;
+    const per = Math.max(1, Math.floor(buffer.length / n)), out = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      let m = 0;
+      for (let j = i * per, end = Math.min(buffer.length, j + per); j < end; j += 4) { const v = Math.max(Math.abs(a[j]), Math.abs(b[j])); if (v > m) m = v; }
+      out[i] = m;
+    }
+    return out;
+  }
+  function onBar(name) {
+    if (!window.Player || !window.Player.attach) return;
+    $('ms-onbar').classList.add('hidden');
+    const PC = window.PlayerCore;
+    barPlaying = playing;
+    barUpdate = window.Player.attach({
+      label: 'Mastering', title: name, sub: '',
+      wave: PC && PC.waveShape ? PC.waveShape(wavePeaks()) : null,
+      duration: () => (buffer ? buffer.duration : 0),
+      time: () => (buffer ? pos / buffer.sampleRate : 0),
+      playing: () => playing,
+      toggle: togglePlay,
+      pause: () => { playing = false; renderTransport(); },
+      seek,
+      volume: (g) => { if (volume) volume.gain.setTargetAtTime(g, ctx.currentTime, 0.015); },
+      onDetach: () => { barUpdate = null; $('ms-onbar').classList.remove('hidden'); },
+      reveal: () => { document.querySelector('.tab[data-tool="editor"]')?.click(); tool.open = true; tool.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+    });
+  }
+  // The player took the bar back (it played a song): this puts the song here back on it, playing.
+  $('ms-onbar').addEventListener('click', () => { if (!buffer) return; onBar($('ms-name').textContent); if (!playing) togglePlay(); });
   $('ms-ab').addEventListener('click', () => {
     ensureAudio();
     chain.bypass = !chain.bypass;
@@ -200,6 +215,7 @@
       chain.reset();
       $('ms-name').textContent = r.name;
       $('ms-src').title = path;
+      onBar(r.name);
     } catch (e) {
       buffer = null; file = null;
       $('ms-name').textContent = 'Drop a song here, or click';
@@ -331,4 +347,13 @@
   });
 
   renderTransport();
+  // Other tools hand songs over (the stem splitter's vocals / instrumental): opens Mastering with it.
+  window.MasterUI = {
+    load(p) {
+      document.querySelector('.tab[data-tool="editor"]')?.click();
+      tool.open = true;
+      tool.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      load(p);
+    },
+  };
 })();

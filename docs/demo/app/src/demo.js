@@ -6,8 +6,21 @@
   const listen = (name) => (cb) => { (on[name] ||= []).push(cb); };
   const emit = (name, data) => (on[name] || []).forEach((cb) => { try { cb(data); } catch (e) { console.error(e); } });
   let st = { slskUser: 'nabbit_demo', slskHasPassword: true, slskPort: 2234, slskOnline: true, isWindows: true, version: '0.1.0', startWithWindows: true, startMinimized: false, closeToTray: true, shellMenu: true,
-    downloadDir: 'C:\\Users\\you\\Downloads', hwAccel: 'cuda', theme: 'dark', blurNow: true, extClients: [{ name: 'Firefox' }] };
+    downloadDir: 'C:\\Users\\you\\Videos\\Nabbit\\Videos', saveLayout: 'nabbit', discordMode: 'songs', discordPicture: 'mine', discordAppId: '', discordAlbum: true, discordTime: true, discordPlay: true, discordHasApp: true, discordConnected: true, discordExact: true, hwAccel: 'cuda', theme: 'dark', blurNow: true, extClients: [{ name: 'Firefox' }] };
   try { const t = localStorage.getItem('nabbit-demo-theme'); if (t) st.theme = t; } catch {}
+  // Nabbit Home: some songs already played (Listen again, On repeat), the first time the demo opens.
+  try {
+    if (!localStorage.getItem('nabbit.plays')) {
+      const M = 'C:\\Users\\you\\Music\\', day = Math.floor(Date.now() / 86400000), plays = {};
+      const add = (p, n, hoursAgo) => { plays[`p:${M}${p}`] = { n, last: Date.now() - hoursAgo * 3600000, hits: Array.from({ length: n }, (_, i) => day - (i % 25)) }; };
+      add('Studio B\\Night Drive\\03 Neon Static.flac', 9, 1);
+      add('Hollow Arcade\\Paper Planes\\02 Static Bloom.flac', 7, 3);
+      add('Glass Harbor\\Tidewater\\02 Lighthouse Keeper.flac', 4, 20);
+      add('Hollow Arcade\\Lantern Season\\03 Low Orbit.flac', 3, 30);
+      add('Studio B\\Night Drive\\02 Overpass.flac', 2, 48);
+      localStorage.setItem('nabbit.plays', JSON.stringify(plays));
+    }
+  } catch { /* none */ }
   // ?solid: no window blur (for screenshots); ?light: light theme.
   if (/solid/.test(location.search)) st.blurNow = false;
   if (/light/.test(location.search)) st.theme = 'light';
@@ -50,6 +63,13 @@
     { format_id: '140', ext: 'm4a', acodec: 'mp4a.40.2', vcodec: 'none', abr: 129, asr: 44100, filesize: 4380000 },
     { format_id: '251', ext: 'webm', acodec: 'opus', vcodec: 'none', abr: 141, asr: 48000, filesize: 4700000 }] });
 
+  const demoStems = [
+    { id: 'kim-vocal-2', name: 'Kim Vocal 2', kind: 'mdx', size: 63.7e6, installed: true, stems: ['Vocals', 'Instrumental'], note: 'Recommended: the fastest, and the cleanest vocals and instrumental (by Kimberley Jensen).' },
+    { id: 'htdemucs', name: 'Demucs v4 · 4 stems', kind: 'htdemucs', size: 170e6, installed: true, stems: ['vocals', 'drums', 'bass', 'other', 'instrumental'], note: 'Vocals, drums, bass and other (and the instrumental: all but the vocals). For drums and bass; slower.' },
+    { id: 'mdx-inst-hq3', name: 'UVR-MDX-NET Inst HQ 3', kind: 'mdx', size: 63.7e6, installed: false, stems: ['Instrumental', 'Vocals'], note: 'Instrumental and vocals: very clean instrumentals.' },
+    { id: 'mdx-voc-ft', name: 'UVR-MDX-NET Voc FT', kind: 'mdx', size: 63.7e6, installed: false, stems: ['Vocals', 'Instrumental'], note: 'Vocals and instrumental: clean vocals, for acapellas.' },
+    { id: 'mdx-kara-2', name: 'UVR-MDX-NET Karaoke 2', kind: 'mdx', size: 50.3e6, installed: false, stems: ['Instrumental', 'Vocals'], note: 'Takes the lead vocal out and keeps the backing vocals. Best run on a vocals stem.' },
+  ];
   const api = {
     // ----- app / window -----
     settingsGet: async () => st,
@@ -59,6 +79,13 @@
     windowTitle: async () => 'Nabbit',
     winControl: async (a) => ({ filled: a === 'max' }),
     defaultFolder: async () => st.downloadDir,
+    musicFolder: async () => 'C:\\Users\\you\\Music\\Nabbit\\Music',
+    nabbitFolders: async () => [
+      ...['Music', 'Masters', 'Stems', 'Converted', 'Trimmed', 'Compressed', 'Pitch and Tempo'].map((n) => ({ group: 'Music', label: n, dir: `C:\\Users\\you\\Music\\Nabbit\\${n}` })),
+      ...['Videos', 'Converted', 'Trimmed', 'Compressed', 'Frames'].map((n) => ({ group: 'Videos', label: n, dir: `C:\\Users\\you\\Videos\\Nabbit\\${n}` })),
+      { group: 'Documents', label: 'Misc', dir: 'C:\\Users\\you\\Documents\\Nabbit\\Misc' },
+    ],
+    nabbitFolderOpen: async () => true,
     pickFolder: async () => st.downloadDir,
     pickFile: async () => 'demo/clip.mp4',
     pickFiles: async () => ['C:\\Users\\you\\Videos\\holiday 4k.mov', 'C:\\Users\\you\\Music\\interview.wav'],
@@ -76,7 +103,14 @@
         trim: ['Cutting at keyframes', 'Joining segments'],
         master: ['Mastering · Stereo → Spectral → EQ → Clipper', 'Encoding FLAC · 24-bit'],
         quick: ['Downloading video', 'Downloading audio', 'Merging'],
+        stems: ['Reading the audio', 'Splitting · Demucs v4 · 4 stems · GPU', 'Saving Vocals', 'Saving Drums', 'Saving Bass', 'Saving Other'],
       }[type] || ['Converting', 'Finishing'];
+      if (type === 'stems') {
+        const noExt = opts.input.replace(/\.[^.\\/]+$/, ''), base = noExt.split(/[\\/]/).pop();
+        const dir = opts.outDir ? `${opts.outDir}\\${base}` : noExt;
+        const outs = (opts.outputs && opts.outputs.length ? opts.outputs : ['vocals', 'drums', 'bass', 'other', 'instrumental']).map((n) => `${dir} - stems\\${base} (${n[0].toUpperCase()}${n.slice(1)}).${opts.format || 'wav'}`);
+        return { id: fakeJob(title, outs, steps) };
+      }
       const out = type === 'master' ? 'C:\\Users\\you\\Music\\Night Drive (master).flac'
         : opts && opts.input ? opts.input.replace(/(\.[^.\\/]+)$/, type === 'compress' ? '_small$1' : '_edit$1') : `C:\\Users\\you\\Downloads\\${name}`;
       return { id: fakeJob(title || `${type} · ${name}`, [out], steps) };
@@ -108,7 +142,7 @@
       for (const [artist, album, year, titles] of A) titles.forEach((title, i) => tracks.push({
         path: `C:\\Users\\you\\Music\\${artist}\\${album}\\${String(i + 1).padStart(2, '0')} ${title}.flac`, ext: 'flac', title, artist: title === 'Exit Signs' ? 'Studio B;Glass Harbor;Hollow Arcade' : artist, albumArtist: artist, album, track: i + 1, disc: 1, year,
         duration: 150 + ((k++ * 37) % 150), codec: 'FLAC', rate: album === 'Night Drive' ? 48000 : 44100, bits: 16, kbps: 900 + (k * 13) % 200, channels: 2,
-        hasCover: false, hasLyrics: title === 'Static Bloom', playable: true, size: 3e7, mtime: Date.now() - k * 86400000 * 3,
+        hasCover: true, hasLyrics: title === 'Static Bloom', playable: true, size: 3e7, mtime: Date.now() - k * 86400000 * 3,
         rating: title === 'Static Bloom' ? 5 : title === 'Afterglow' ? 4 : 0, loved: title === 'Static Bloom',
       }));
       // A music video beside one song (same name): the cover's Video toggle shows it.
@@ -117,8 +151,39 @@
       return { folders: ['C:\\Users\\you\\Music', 'C:\\Users\\you\\Downloads'], tracks, scanning: false };
     },
     libScan: async () => true, libAddFolder: async () => null, libRemoveFolder: async () => ['C:\\Users\\you\\Music'],
-    libRate: async (_p, o) => o, libCover: async () => null,
+    libRate: async (_p, o) => o,
+    libCover: async (p) => { const al = ['Paper Planes', 'Lantern Season', 'Night Drive', 'Tidewater'].findIndex((a) => String(p).includes(`\\${a}\\`)); return al < 0 ? null : covers(al + 1); },
     mediaUrl: async () => 'demo/track.mp3',
+    // A drum-loop-like envelope at 120 BPM (a hit every half second, from 0.1 s), 5 ms steps.
+    ptWave: async () => { const n = 40 * 200, peaks = new Float32Array(n); for (let i = 0; i < n; i++) { const t = i / 200, ph = ((t - 0.1) % 0.5 + 0.5) % 0.5; peaks[i] = 0.08 + 0.8 * Math.exp(-ph / 0.06) * (Math.floor((t - 0.1) / 0.5) % 4 === 0 ? 1 : 0.6); } return { rate: 200, peaks }; },
+    // Player → sources: SoundCloud signed in (sample home), YouTube Music signed out.
+    scAccount: async () => ({ signedIn: true, name: 'you' }),
+    scHome: async () => ({ account: { signedIn: true, name: 'you' }, sections: [
+      { title: 'Made for you', kind: 'tiles', items: ['Weekly Wave', 'Daily Drops', 'Your Mix 1', 'Your Mix 2', 'Discover Station'].map((t, i) => ({ type: 'playlists', kind: 'Mix', title: t, artist: 'SoundCloud', url: `https://soundcloud.com/discover/sets/${i}` })) },
+      { title: 'From your feed', kind: 'songs', items: Array.from({ length: 12 }, (_, i) => ({ type: 'songs', title: `Feed song ${i + 1}`, artist: `Artist ${i + 1}`, url: `https://soundcloud.com/a/s${i}`, duration: 150 + i * 7 })) },
+      { title: 'Your likes', kind: 'songs', items: Array.from({ length: 5 }, (_, i) => ({ type: 'songs', title: `Liked ${i + 1}`, artist: 'Someone', url: `https://soundcloud.com/b/l${i}`, duration: 200 })) },
+    ] }),
+    scSetTracks: async () => [{ url: 'https://soundcloud.com/a/s1', title: 'Feed song 2', artist: 'Artist 2', duration: 157 }],
+    scSignIn: async () => ({ signedIn: true, name: 'you' }), scSignOut: async () => ({ signedIn: false }),
+    ytmAccount: async () => ({ signedIn: false }), ytmSignIn: async () => null, ytmSignOut: async () => ({ signedIn: false }),
+    ytmHome: async () => { throw new Error('signed-out'); }, ytmSetTracks: async () => [],
+    discLastfm: async (period) => ({ on: true, period, user: 'you', scrobbles: 48213, since: 1546300800, artists: 2310, top: [{ name: 'Neon Tide', plays: 812 }, { name: 'Glass Harbor', plays: 403 }, { name: 'Moth Radio', plays: 120 }] }),
+    discSeeds: async () => [{ name: 'Glass Harbor', weight: 20 }, { name: 'Hollow Arcade', weight: 30 }, { name: 'Studio B', weight: 8 }],
+    discArtist: async ({ name }) => { await new Promise((r) => setTimeout(r, 200)); const pool = ['Neon Tide', 'Paper Lanterns', 'Night Ferry', 'Low Orbit', 'Velvet Static', 'Cold Spring', 'Moth Radio', 'Silver Coast', 'Dune Club', 'Echo Park', 'Slow Fauna', 'Tin Garden'];
+      let x = [...name].reduce((a, c) => a + c.charCodeAt(0), 0); const rel = []; for (let i = 0; i < 7; i++) { x = (x * 31 + 7) % 997; rel.push({ name: pool[x % pool.length], url: null, thumbnail: `https://picsum.photos/seed/${encodeURIComponent(pool[x % pool.length])}/120` }); }
+      return { name, url: null, thumbnail: null, subs: '1.2M monthly audience', stats: { yourPlays: 342, listeners: 1203400, plays: 22000000, tags: ['hip-hop', 'underground', 'cloud rap'] }, related: [...new Map(rel.map((r) => [r.name, r])).values()], songs: [1, 2, 3].map((i) => ({ title: `${name} song ${i}`, url: `https://music.youtube.com/watch?v=${String(i).padStart(11, 'a')}`, duration: 180 + i })) }; },
+    ptMarkers: async () => [],
+    // Live slicing: the demo track decoded here, cut every half beat at 120 BPM.
+    ptSlices: async (_p, o = {}) => {
+      const sr = o.sr || 48000, c = new OfflineAudioContext(2, sr, sr);
+      const b = await c.decodeAudioData(await (await fetch('demo/track.mp3')).arrayBuffer());
+      const n = b.length, L = b.getChannelData(0), R = b.numberOfChannels > 1 ? b.getChannelData(1) : L, f = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) { f[2 * i] = L[i]; f[2 * i + 1] = R[i]; }
+      const cuts = []; for (let t = 0.1; t * sr < n; t += 0.25) cuts.push(Math.round(t * sr));
+      return { sr, pcm: o.noPcm ? null : new Uint8Array(f.buffer), cuts, markers: 0 };
+    },
+    playFilesInfo: async (paths) => paths.map((p) => { const name = p.split(/[\\/]/).pop(); const ext = (name.split('.').pop() || '').toLowerCase();
+      return { path: p, ext, title: name.replace(/\.[^.]+$/, ''), artist: '', album: '', duration: 40, playable: true, hasCover: false, size: 3e7, mtime: Date.now() }; }),
     lastfmStatus: async () => ({ key: '', hasSecret: false, user: '', on: true, love: true, pending: 0, connecting: false }),
     lastfmKeys: async () => { throw new Error('Not in the demo.'); }, lastfmConnect: async () => { throw new Error('Not in the demo.'); },
     lastfmCancel: async () => ({}), lastfmDisconnect: async () => ({}), lastfmSet: async (o) => ({ key: '', hasSecret: false, user: '', on: o.on !== false, love: o.love !== false, pending: 0 }),
@@ -126,8 +191,29 @@
     plGet: async () => { try { return JSON.parse(localStorage.getItem('demo.playlists') || '[]'); } catch { return []; } },
     plSet: async (list) => { localStorage.setItem('demo.playlists', JSON.stringify(list)); return list; },
     wavePeaks: async (p) => Array.from({ length: 1200 }, (_, i) => Math.min(1, 0.25 + 0.55 * Math.abs(Math.sin(i / 37 + p.length)) * (0.6 + 0.4 * Math.sin(i / 7)) ** 2)),
+    // Share links: pretend Tailscale Funnel is on (nothing leaves the browser).
+    ...(() => {
+      let list = [], on = false, hours = 24;
+      const st = () => ({ state: on ? 'on' : 'off', host: 'my-pc.tail1234.ts.net', enableUrl: '', error: '', on, hours,
+        list: list.map((x) => ({ ...x, exists: true, embeds: /\.(mp4|webm|mov|m4v)$/i.test(x.path), url: on ? `https://my-pc.tail1234.ts.net/nabbit/v/${x.token}` : '' })) });
+      const make = (path) => { const token = Math.random().toString(36).slice(2, 13) + Math.random().toString(36).slice(2, 13); list.unshift({ token, path, title: path.split(/[\\/]/).pop().replace(/\.[^.]+$/, ''), created: Date.now(), expires: hours ? Date.now() + hours * 3600e3 : 0, views: 0 }); on = true; return { token, url: `https://my-pc.tail1234.ts.net/nabbit/v/${token}`, copied: true, embeds: /\.(mp4|webm|mov|m4v)$/i.test(path) }; };
+      return {
+        shareStatus: async () => st(), shareSet: async (o) => { if (o.on !== undefined) on = !!o.on; if (o.hours !== undefined) hours = o.hours; return st(); },
+        shareEnable: async () => {}, shareGetTailscale: async () => {}, shareCreate: async (p) => make(p), sharePick: async () => make('C:\\Users\\you\\Videos\\Clip.mp4'),
+        shareCopy: async () => true, shareRevoke: async (t) => { list = list.filter((x) => x.token !== t); return st(); }, onShareStatus: () => {},
+      };
+    })(),
+    // DJ mode: a made-up tempo and key per song (the sample clip is the same for all of them).
+    djAnalyze: async (p) => {
+      await new Promise((r) => setTimeout(r, 400));
+      const h = [...String(p)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+      const keys = [['8A', 'A minor'], ['9A', 'E minor'], ['8B', 'C major'], ['7A', 'D minor'], ['3B', 'D♭ major']];
+      const k = keys[h % keys.length];
+      const env = Array.from({ length: 80 }, (_, i) => (i >= 12 && i < 66 ? -10 + Math.sin(i) : -30));
+      return { v: 2, bpm: 118 + (h % 9), offset: 0.12, conf: 0.8, key: k[1], camelot: k[0], keyConf: 0.6, start: 0.2, end: 39.5, duration: 40, env, low: env };
+    },
     wavePeaksStream: async () => Array.from({ length: 1200 }, (_, i) => 0.3 + 0.5 * Math.abs(Math.sin(i / 23))),
-    fxSource: async () => `${await (await fetch('../mastering.js')).text()}\n${await (await fetch('../player-core.js')).text()}`,
+    fxSource: async () => `${await (await fetch('../mastering.js')).text()}\n${await (await fetch('../player-core.js')).text()}\n${await (await fetch('../pitch.js')).text()}`,
     vstInfo: async () => ({ host: false, dirs: ['C:\\Program Files\\Common Files\\VST3'], plugins: [{ name: 'Demo Reverb', path: 'C:\\Program Files\\Common Files\\VST3\\Demo Reverb.vst3' }, { name: 'Demo Tape', path: 'C:\\Program Files\\Common Files\\VST3\\Demo Tape.vst3' }] }),
     vstAddFolder: async () => null,
     vstStart: async () => ({ ok: false, error: "The plugin host isn't built yet (see vsthost\\README.md)." }),
@@ -136,6 +222,7 @@
     vstCmd: () => {}, vstAudio: () => {}, onVstAudio: () => {}, onVstEvent: () => {},
     libYtLoop: async () => { await wait(400); throw new Error('No music video in the demo.'); },
     streamLoop: async () => { await wait(400); throw new Error('No music video in the demo.'); },
+    streamYtVideo: async (m = {}) => { await wait(900); return { id: 'demo', file: 'C:\\Users\\you\\AppData\\Local\\Temp\\nabbit-mv\\demo.mp4', title: `${m.title} (Official Music Video)`, channel: 'Demo VEVO', duration: 200 }; },
     libYtVideo: async (p, o = {}) => { await wait(900); const name = p.split('\\').pop().replace(/^\d+ |\.\w+$/g, ''); return { id: 'demo', file: 'C:\\Users\\you\\AppData\\Local\\Temp\\nabbit-mv\\demo.mp4', synced: !o.next, title: `${name} (Official Music Video)`, channel: 'Demo VEVO', duration: 200 }; },
     onLibYtProgress: () => {},
     libLyrics: async () => ({ source: 'lrclib', text: '[00:00.50]Streetlights counting down the miles\n[00:04.00]Radio hum and open skies\n[00:07.50]We were neon, we were static\n[00:11.00]Glowing out of every line' }),
@@ -175,7 +262,9 @@
     musicBetter: async () => null,
     musicFindYtm: async () => null,
     streamOpen: async (url, q, o = {}) => { await wait(300); return { key: 'k' + url, src: 'demo/track.mp3', cached: true, meta: { duration: 40, ...(o.meta || {}) } }; },
-    streamPrefetch: async () => null, streamWarm: async () => true,
+    streamPrefetch: async (url) => { await wait(200); return { key: 'k' + url, src: 'demo/track.mp3', cached: true }; }, streamWarm: async () => true,
+    streamAdopt: async () => {}, streamHold: async () => {},
+    djAnalyzeStream: async (key) => api.djAnalyze(String(key)),
     streamCacheInfo: async () => ({ files: 12, bytes: 61e6 }), streamCacheClear: async () => ({ files: 0, bytes: 0 }),
     streamLyrics: async () => ({ synced: '[00:00.50] Headlights on the overpass\n[00:04.00] Counting exits in the rain\n[00:08.00] Night drive, night drive\n[00:12.00] Neon static on the windscreen\n[00:16.00] Nowhere left to be\n[00:20.00] Night drive, night drive\n[00:24.00] Afterglow' }),
 
@@ -241,6 +330,19 @@
       }
       return { name: 'Night Drive (demo loop).wav', duration: secs, data: new Uint8Array(data.buffer) };
     },
+
+    // ----- stems: Demucs downloaded, the UVR models not (download them to see it work) -----
+    stemsModels: async () => ({ dir: 'C:\\Users\\you\\AppData\\Roaming\\Nabbit\\stem-models', ort: true, models: demoStems }),
+    stemsDownload: async (id) => {
+      const m = demoStems.find((x) => x.id === id);
+      for (let got = 0; got <= m.size; got += m.size / 12) { await wait(220); emit('stems-dl', { id, got, total: m.size }); }
+      m.installed = true; emit('stems-dl', { id, got: m.size, total: m.size, done: true }); return { ok: true };
+    },
+    stemsRemove: async (id) => { const m = demoStems.find((x) => x.id === id); if (m && m.own) demoStems.splice(demoStems.indexOf(m), 1); else if (m) m.installed = false; return demoStems; },
+    stemsAddOwn: async () => { const m = { id: 'own-1', name: 'My UVR model', kind: 'mdx', note: 'D:\\Models\\My UVR model.onnx', size: 56e6, own: true, installed: true, needsParams: true, stems: ['Vocals', 'Instrumental'] }; demoStems.push(m); return { models: demoStems, added: [] }; },
+    stemsOwnParams: async (id, p) => { const m = demoStems.find((x) => x.id === id); m.needsParams = false; m.params = p; m.stems = [p.primary, p.primary === 'Vocals' ? 'Instrumental' : 'Vocals']; return demoStems; },
+    stemsDir: async () => ({ dir: 'D:\\Stem models', models: demoStems }),
+    onStemsDl: listen('stems-dl'),
 
     // ----- compressor -----
     cpScan: async () => { await wait(300); return [

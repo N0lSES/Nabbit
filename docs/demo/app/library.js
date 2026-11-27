@@ -163,8 +163,8 @@ function groupFolders(tracks, roots = []) {
   return groups;
 }
 
-// YouTube search results → the song's music video: the title has to name the song; official videos
-// and the artist's own channel win; lyric / live / cover / remix uploads lose (unless the song is one);
+// YouTube search results → the song's music video: the title has to name the song; "(Official Music
+// Video)", then "(Music Video)", then "(Video)" come first; the artist's own channel wins; lyric / live / cover / remix uploads lose (unless the song is one);
 // the closer the length, the better. → { pick, synced } (synced: within 10 s, so your file's audio
 // can play under the picture) or null.
 function pickMusicVideo(entries, { title, artist, duration }, skip = []) {
@@ -179,7 +179,12 @@ function pickMusicVideo(entries, { title, artist, duration }, skip = []) {
     const name = norm(e.title), ch = norm(e.channel || e.uploader);
     if (!name.includes(T)) continue;
     let score = 0;
-    if (/\bofficial (music )?video\b|\bofficial mv\b|\bmusic video\b|\bmv\b/.test(name)) score += 4;
+    // The video's own label, best first: (Official Music Video), then (Music Video) / (Official Video),
+    // then (Video): worth more than the channel and the length together, so they come first.
+    const notMv = /\b(lyrics?|audio|visuali[sz]er|live|dance|reaction|behind the scenes|teaser|trailer|performance)\b/.test(name);
+    if (!notMv && /\bofficial music video\b|\bofficial mv\b/.test(name)) score += 24;
+    else if (!notMv && /\bmusic video\b|\bofficial video\b|\bmv\b/.test(name)) score += 18;
+    else if (!notMv && /\bvideo\b/.test(name)) score += 12;
     else if (/\bofficial\b/.test(name)) score += 1;
     if (/\bofficial audio\b|\baudio\b|\bvisuali[sz]er\b/.test(name)) score -= 3;
     const bad = name.match(BAD);
