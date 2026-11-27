@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nabbit interface</title>
+<style>
+/*
+VOICE: quiet presentation; the app speaks for itself.
+IDEA: a desktop with the Nabbit window open on it.
+PICTURE: the live interface, scaled to fit, its acrylic blur over a soft bloom wallpaper.
+COLOUR and TYPE: night-blue wallpaper with red, violet and teal blooms; the app's own type.
+LAYOUT: the window centred, one small caption under it.
+*/
+:root{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+html,body{margin:0;height:100%}
+body{background:#070b16;color:#c9cfdb;font:13px/1.4 "Segoe UI",system-ui,sans-serif;overflow:hidden;display:grid;place-items:center}
+.wall{position:fixed;inset:0;overflow:hidden}
+.wall i{position:absolute;border-radius:50%;filter:blur(60px);opacity:.85}
+.wall i:nth-child(1){width:55vmax;height:55vmax;left:-12vmax;top:-18vmax;background:radial-gradient(circle,#3b2a8f,transparent 68%)}
+.wall i:nth-child(2){width:48vmax;height:48vmax;right:-14vmax;top:4vmax;background:radial-gradient(circle,#c2334d,transparent 66%)}
+.wall i:nth-child(3){width:50vmax;height:50vmax;left:18vmax;bottom:-26vmax;background:radial-gradient(circle,#0f7a8a,transparent 66%)}
+.wall i:nth-child(4){width:18vmax;height:18vmax;left:52vmax;top:30vmax;background:radial-gradient(circle,#f0a35e,transparent 70%);opacity:.5}
+.stage{position:relative;display:flex;flex-direction:column;align-items:center;gap:12px}
+.win{width:1100px;height:760px;transform-origin:top left;border-radius:8px;overflow:hidden;
+  box-shadow:0 0 0 1px rgba(255,255,255,.14),0 30px 80px rgba(0,0,0,.55),0 8px 24px rgba(0,0,0,.4);
+  background:rgba(20,22,30,.35);backdrop-filter:blur(42px) saturate(1.5);-webkit-backdrop-filter:blur(42px) saturate(1.5)}
+.win iframe{display:block;width:100%;height:100%;border:0;background:transparent}
+.box{position:relative}
+.cap{opacity:.7;text-align:center;padding:0 16px}
+@media (prefers-reduced-motion:no-preference){.box{animation:rise .6s cubic-bezier(.2,.8,.2,1) both}@keyframes rise{from{opacity:0;transform:translateY(14px)}}}
+</style>
+</head>
+<body>
+<div class="wall" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+<div class="stage">
+  <div class="box" id="box"><div class="win" id="win"><iframe src="app/src/index.html" title="Nabbit app interface" allowtransparency="true"></iframe></div></div>
+  <div class="cap">Nabbit's real interface, running on sample data. Click around: nothing is downloaded or converted.</div>
+</div>
+<script>
+{
+  const win = document.getElementById('win'), box = document.getElementById('box');
+  const W = 1100, H = 760;
+  const fit = () => {
+    const s = Math.min(1, (innerWidth - 32) / W, (innerHeight - 64) / H);
+    win.style.transform = `scale(${s})`;
+    box.style.width = W * s + 'px';
+    box.style.height = H * s + 'px';
+  };
+  const ro = new ResizeObserver(fit);
+  ro.observe(document.body);
+  fit();
+}
+</script>
+</body>
+</html>
